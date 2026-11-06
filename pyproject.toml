@@ -1,0 +1,20 @@
+[project]
+name = "classroom-task-manager"
+version = "0.1.0"
+description = "School task manager: local BAZE and Google Classroom connection tools"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=50.0.2",
+    "fastapi>=0.162.0",
+    "google-api-python-client>=2.201.0",
+    "google-auth-oauthlib>=1.5.0",
+    "pypdf>=6.21.4",
+    "python-dotenv>=1.2.4",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]

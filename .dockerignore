@@ -1,0 +1,16 @@
+.git
+.venv
+.uv-cache
+.local
+.vscode
+.agents
+.codex
+.env
+.env.*
+credentials*.json
+client_secret*.json
+token.json
+**/__pycache__
+*.pyc
+tests
+scripts

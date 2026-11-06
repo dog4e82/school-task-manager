@@ -1,4 +1,22 @@
-.DS_Store
-Thumbs.db
+# Python-generated files
 __pycache__/
-node_modules/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+.env.*
+!.env.example
+.uv-cache/
+*.tmp.json
+
+# Local Google OAuth credentials and user data
+credentials.json
+credentials.web.json
+client_secret*.json
+token.json
+.local/
