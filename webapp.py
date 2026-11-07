@@ -129,6 +129,11 @@ def create_app(settings=None):
         # Render's health checks and old bookmarks can retain this exact host
         # after a custom domain is enabled. Do not trust a wildcard domain.
         allowed_hosts.add(render_host)
+    if render_host == 'moa-classroom.onrender.com':
+        # This exact owner-controlled host is registered in render.yaml. Render
+        # health checks switch to it as soon as DNS verification completes,
+        # before the operator switches APP_BASE_URL and Google redirect URIs.
+        allowed_hosts.add('app.moa-classroom.dynv6.net')
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
 
     @app.middleware("http")
@@ -278,7 +283,7 @@ def create_app(settings=None):
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 1}
+                "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 2}
 
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():

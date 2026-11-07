@@ -122,6 +122,19 @@ class WebTests(unittest.TestCase):
             self.assertEqual(client.get('/health').status_code,200)
             self.assertEqual(client.get('https://untrusted.example.invalid/auth/google').status_code,400)
 
+    def test_render_custom_host_health_works_before_oauth_origin_switch(self):
+        staging=Settings('https://moa-classroom.onrender.com',Path(self.temp.name)/'staged',self.settings.token_key,
+                         self.settings.client_id,self.settings.client_secret)
+        with patch.dict(os.environ,{'RENDER_EXTERNAL_URL':'https://moa-classroom.onrender.com'}):
+            staged_app=create_app(staging)
+        with TestClient(staged_app,base_url='https://app.moa-classroom.dynv6.net',follow_redirects=False) as client:
+            self.assertEqual(client.get('/health').status_code,200)
+            self.assertEqual(client.get('/').status_code,200)
+            login=client.get('/auth/google?pdf=1')
+            self.assertEqual(login.headers['location'],'https://moa-classroom.onrender.com/auth/google?pdf=1')
+            self.assertNotIn('set-cookie',login.headers)
+            self.assertEqual(client.get('https://unknown.moa-classroom.dynv6.net/health').status_code,400)
+
     def test_each_account_only_receives_its_own_snapshot(self):
         self.login(self.a)
         first = self.client.get("/api/data")
