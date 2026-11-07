@@ -154,6 +154,11 @@ def create_app(settings=None):
             response.headers["Content-Security-Policy"] += "; default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'"
         return response
 
+    def canonical_page(request, path):
+        if request.url.hostname != urlsplit(settings.base_url).hostname:
+            return RedirectResponse(settings.base_url + path, status_code=303)
+        return None
+
     def session(request):
         value = store.session(request.cookies.get(settings.cookie, ""))
         if not value:
@@ -302,10 +307,11 @@ def create_app(settings=None):
 
     @app.get("/auth/google")
     def login(request: Request, pdf: bool = False):
-        if request.url.hostname != urlsplit(settings.base_url).hostname:
-            # The binding cookie must be set on the same host as the callback.
-            # Redirect before creating any OAuth state; never forward a code.
-            return RedirectResponse(settings.base_url + '/auth/google' + ('?pdf=1' if pdf else ''), status_code=303)
+        # The binding cookie must be set on the same host as the callback.
+        # Redirect before creating any OAuth state; never forward a code.
+        canonical = canonical_page(request, '/auth/google' + ('?pdf=1' if pdf else ''))
+        if canonical is not None:
+            return canonical
         if not settings.configured:
             return RedirectResponse("/?error=oauth_failed", status_code=303)
         verifier, nonce = secrets.token_urlsafe(64), secrets.token_urlsafe(32)
@@ -376,6 +382,9 @@ def create_app(settings=None):
 
     @app.get("/setup", response_class=HTMLResponse)
     def select_courses(request: Request):
+        canonical = canonical_page(request, '/setup')
+        if canonical is not None:
+            return canonical
         try:
             current = session(request)
         except HTTPException:
@@ -387,6 +396,9 @@ def create_app(settings=None):
 
     @app.get("/app", response_class=HTMLResponse)
     def dashboard(request: Request):
+        canonical = canonical_page(request, '/app')
+        if canonical is not None:
+            return canonical
         try:
             current = session(request)
         except HTTPException:

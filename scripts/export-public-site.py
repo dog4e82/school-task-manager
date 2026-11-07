@@ -38,8 +38,8 @@ def contents(app_origin, public_origin=''):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--app-origin', type=origin, default='https://moa-classroom.onrender.com')
-    parser.add_argument('--public-origin', type=origin)
+    parser.add_argument('--app-origin', type=origin, default='https://app.moa-classroom.dynv6.net')
+    parser.add_argument('--public-origin', type=origin, default='https://info.moa-classroom.dynv6.net')
     parser.add_argument('--output', type=Path, default=ROOT / 'public-site')
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()

@@ -4,14 +4,16 @@
 
 ## 현재 확인한 상태
 
-- 공개 주소: https://moa-classroom.onrender.com
-- 개인정보 안내: https://moa-classroom.onrender.com/privacy
-- 승인된 웹 OAuth 콜백: https://moa-classroom.onrender.com/auth/callback
+- 소개 주소: https://info.moa-classroom.dynv6.net
+- 개인정보 안내: https://info.moa-classroom.dynv6.net/privacy
+- 앱의 새 기준 주소: https://app.moa-classroom.dynv6.net
+- 새 웹 OAuth 콜백: https://app.moa-classroom.dynv6.net/auth/callback
 - 실제 Google 계정의 웹 로그인과 수업 선택 화면 진입은 확인했다.
 - 사용자가 제공한 콘솔 상태 기준 Audience는 External(외부)이며 브랜딩 입력·저장을 마친 뒤 In production(프로덕션) 전환을 완료했다고 알렸다. Google 브랜드·데이터 접근 검증 승인은 확인 전이다.
 - 웹 OAuth Client ID·Secret과 고정 암호화 키는 로그인에 성공한 현재 값을 유지한다.
 - 사용자가 범위 추가를 진행한 뒤 제공한 검증 센터에는 데이터 접근이 미인증이며 민감·제한 범위 때문에 검증이 필요하다고 표시된다. 데이터 접근 검증 신청 전에 브랜딩을 인증·게시해야 한다는 안내가 있다. 브랜딩 인증·게시가 다음 단계이며, 전체 범위 목록의 일치는 별도 확인 전이다.
 - 이후 브랜딩 검사에서는 홈페이지·정책 페이지 응답 실패, 도메인 소유권 미확인, 정책 링크·서비스 설명·이름 및 정책 내용 관련 문제가 보고됐다. 앱은 소개·정책 페이지를 로그인·DB 조회와 분리하고 명시적인 서비스 설명·정책 링크·브랜드명과 실제 처리 내역을 보완했다. 사용자는 보유한 도메인이 없다고 확인했다. 도메인 소유권과 무료 서버의 절전 시 접속 가능 여부는 해결 전이다.
+- 이후 무료 Static Site `moa-info`를 생성하고 소개·앱의 새 커스텀 도메인 두 개에 대해 HTTPS를 확인했다. dynv6 이메일 인증 후 CNAME 두 개와 Google 확인용 TXT의 정확한 공개 DNS 일치를 확인했으며, 사용자가 Google Search Console의 소유권 확인 완료를 알렸다. Google 브랜딩·클라이언트 URL 변경과 새 기준 주소 전환은 단계적으로 진행하며, 브랜딩·범위 검증 승인은 아직 확인 전이다.
 
 ## 콘솔에서 진행할 순서
 

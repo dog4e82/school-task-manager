@@ -16,6 +16,8 @@ services:
         value: 3.13.7
       - key: APP_DATA_DIR
         value: /tmp/moa
+      - key: APP_BASE_URL
+        value: https://app.moa-classroom.dynv6.net
       - key: DATABASE_URL
         sync: false
       - key: APP_TOKEN_KEY

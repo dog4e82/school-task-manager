@@ -73,7 +73,7 @@ uv run scripts/prepare-render-env.py
 | `APP_TOKEN_KEY` | 고정 Fernet 키. `.local/render.env`에서 설정. 교체하면 기존 토큰 복호화 불가 |
 | `GOOGLE_WEB_CLIENT_ID` | 웹 앱용 OAuth Client ID |
 | `GOOGLE_WEB_CLIENT_SECRET` | 웹 앱용 OAuth Secret |
-| `APP_BASE_URL` | Render에서는 플랫폼의 `RENDER_EXTERNAL_URL`을 자동 사용. 사용자 도메인일 때만 명시적으로 설정 |
+| `APP_BASE_URL` | 로그인 콜백의 기준 주소. 현재 Blueprint는 `https://app.moa-classroom.dynv6.net`을 명시하며, 미설정 로컬/기타 배포에서는 `RENDER_EXTERNAL_URL` 또는 로컬 주소를 사용 |
 | `APP_DATA_DIR` | 임시 PDF 캐시 경로 `/tmp/moa`. 계정 기록은 외부 DB에 저장 |
 | `WEB_AI_ENABLED` | 초기 `false`. BAZE 설정과 별도 활성화 전에는 생성 호출 없음 |
 | `BAZE_BASE_URL` | 기존 분석 캐시 재사용에도 로컬과 동일한 주소 필요 |

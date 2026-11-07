@@ -119,6 +119,12 @@ class WebTests(unittest.TestCase):
             self.assertEqual(len(binding),1)
             self.assertEqual(binding[0].domain,'app.moa.example.invalid')
             self.assertTrue(binding[0].secure)
+            with patch.object(domain_app.state.store,'session',side_effect=RuntimeError('must redirect before session lookup')):
+                for path in ('/setup','/app'):
+                    moved=client.get(path)
+                    self.assertEqual(moved.headers['location'],domain_settings.base_url+path)
+                    self.assertEqual(moved.status_code,303)
+                    self.assertNotIn('set-cookie',moved.headers)
             self.assertEqual(client.get('/health').status_code,200)
             self.assertEqual(client.get('https://untrusted.example.invalid/auth/google').status_code,400)
 
