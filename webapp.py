@@ -43,6 +43,31 @@ WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https
 LOGGER = logging.getLogger("moa")
 
 
+class MissingLoginScopes(ValueError):
+    """The token response did not grant the permissions needed by this login."""
+
+
+def accept_granted_scopes(flow, requested):
+    """Accept a genuine grant superset without disabling OAuth scope validation."""
+    required = set(requested)
+
+    def check(response):
+        if response.status_code != 200:
+            return response  # Let the OAuth parser classify token endpoint errors.
+        payload = response.json()
+        if payload.get("error"):
+            return response
+        scopes = payload.get("scope")
+        if not isinstance(scopes, str) or not required.issubset(scopes.split()):
+            raise MissingLoginScopes()
+        # Google may also return permissions previously granted to this project.
+        # Keep the real grant in credentials; never invent or widen a grant.
+        flow.oauth2session.scope = scopes.split()
+        return response
+
+    flow.oauth2session.register_compliance_hook("access_token_response", check)
+
+
 class SyncBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_ids: list[str] = Field(min_length=1, max_length=50)
@@ -232,7 +257,8 @@ def create_app(settings=None):
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "google_login_configured": settings.configured}
+        return {"status": "ok", "google_login_configured": settings.configured,
+                "oauth_flow_version": 2}
 
     @app.get("/privacy", response_class=HTMLResponse)
     def privacy_page():
@@ -267,28 +293,39 @@ def create_app(settings=None):
         elif error or not code:
             response = RedirectResponse("/?error=google_denied", status_code=303)
         else:
+            stage = "token"
             try:
                 flow = Flow.from_client_config(settings.google_config(), scopes=pending["scopes"], state=state, code_verifier=pending["verifier"])
                 flow.redirect_uri = settings.callback
+                accept_granted_scopes(flow, pending["scopes"])
                 flow.fetch_token(code=code, timeout=30)
+                stage = "identity"
                 claims = id_token.verify_oauth2_token(flow.oauth2session.token["id_token"], GoogleRequest(), settings.client_id)
                 if (not hmac.compare_digest(str(claims.get("nonce", "")), pending["nonce"])
                         or not claims.get("sub") or claims.get("email_verified") is not True):
                     raise ValueError("invalid_identity")
+                stage = "permissions"
                 credentials = flow.credentials
                 if not credentials.valid or not credentials.has_scopes(READ_SCOPES):
-                    raise ValueError("missing_read_scopes")
+                    raise MissingLoginScopes()
                 serialized = json.loads(credentials.to_json())
+                stage = "storage"
                 prior = store.get_user(digest("google:" + claims["sub"]))
                 if not serialized.get("refresh_token") and prior:
                     serialized["refresh_token"] = prior["credentials"].get("refresh_token")
                 user_id = store.save_user(claims["sub"], claims.get("email", ""), claims.get("name") or "학생", serialized)
+                stage = "session"
                 store.delete_session(request.cookies.get(settings.cookie, ""))
                 token = store.create_session(user_id)
                 response = RedirectResponse("/setup", status_code=303)
                 response.set_cookie(settings.cookie, token, max_age=604800, httponly=True, secure=settings.secure, samesite="lax", path="/")
-            except (Exception, Warning):
-                response = RedirectResponse("/?error=oauth_failed", status_code=303)
+            except Exception as exc:
+                if isinstance(exc, MissingLoginScopes):
+                    stage = "permissions"
+                # Exception messages can contain tokens or callback URLs. Log only
+                # our fixed stage and the exception class, never the exception.
+                LOGGER.warning("oauth_callback_failed:%s:%s", stage, type(exc).__name__)
+                response = RedirectResponse("/?error=oauth_" + stage + "_failed", status_code=303)
         response.delete_cookie("moa_oauth", path="/auth", secure=settings.secure, httponly=True, samesite="lax")
         return response
 
@@ -443,7 +480,7 @@ def main():
             else:
                 target = Cache(settings.data_dir / "analysis.sqlite3")
             with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as legacy:
-                rows = legacy.execute("SELECT * FROM analyses WHERE status='success' AND model=?", (DEFAULT_MODEL,)).fetchall()
+                rows = legacy.execute("SELECT key,post_key,model,status,result,NULL,updated_at FROM analyses WHERE status='success' AND model=?", (DEFAULT_MODEL,)).fetchall()
             legacy.close()
             before = target.conn.total_changes
             with target.conn:

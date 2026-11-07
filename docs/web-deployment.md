@@ -63,6 +63,8 @@ uv run scripts/prepare-render-env.py
 
 두 번째 명령은 기존 웹 OAuth 설정과 암호화 키를 읽어 Git 제외 파일 `.local/render.env`를 만든다. 비밀값을 터미널에 출력하지 않는다. 파일의 값은 Render 환경변수 설정에만 사용한다.
 
+기존 분석을 공통 캐시에 복사해 재사용한다면 `BAZE_BASE_URL`도 Render 환경변수에 같은 값으로 설정한다. 모델·입력·프롬프트와 함께 캐시 식별에 사용되므로 생성 기능을 꺼 둔 경우에도 필요하다. 준비 파일에 이 값이 자동 포함되며 API 키는 포함하지 않는다. `WEB_AI_ENABLED=false`에서는 생성 호출을 실행하지 않는다.
+
 3. Render에서 **New → Blueprint → school-task-manager 연결**을 선택한다. Branch는 `moa-classroom-web`, Blueprint Path는 `render.yaml`이다. 필요한 환경변수 값을 `.local/render.env`에서 설정하고 서비스가 **Free**인지 확인한 뒤 Deploy Blueprint를 실행한다. 유료 워크스페이스 업그레이드나 유료 인스턴스를 선택하지 않는다. [공식 Blueprint 절차](https://render.com/docs/infrastructure-as-code).
 
 | 변수 | 설정 |
@@ -74,7 +76,8 @@ uv run scripts/prepare-render-env.py
 | `APP_BASE_URL` | Render에서는 플랫폼의 `RENDER_EXTERNAL_URL`을 자동 사용. 사용자 도메인일 때만 명시적으로 설정 |
 | `APP_DATA_DIR` | 임시 PDF 캐시 경로 `/tmp/moa`. 계정 기록은 외부 DB에 저장 |
 | `WEB_AI_ENABLED` | 초기 `false`. BAZE 설정과 별도 활성화 전에는 생성 호출 없음 |
-| `BAZE_BASE_URL`, `BAZE_API_KEY` | AI 기능을 활성화할 때만 서버에서 설정 |
+| `BAZE_BASE_URL` | 기존 분석 캐시 재사용에도 로컬과 동일한 주소 필요 |
+| `BAZE_API_KEY` | AI 생성 기능을 활성화할 때만 서버에서 설정 |
 
 Render 환경에서 `DATABASE_URL`을 빠뜨리면 서버가 시작되지 않는다. 임시 SQLite로 자동 대체하여 개인 기록을 잃는 동작을 허용하지 않는다. 기본 로컬 웹 실행과 CLI는 SQLite를 계속 지원한다. 암호화 키는 DB와 별도로 Render 환경변수에 고정 보관한다.
 
@@ -98,3 +101,17 @@ uv run webapp.py check
 ```
 
 인증·데이터 분리 테스트는 가짜 Google 응답을 사용하며 실계정 로그인을 대신 검증했다고 주장하지 않는다. 실제 웹 OAuth 로그인과 공개 URL 확인은 웹 클라이언트 및 호스팅 계정을 연결한 뒤 수행한다. 접근 로그에는 OAuth code/state나 세션 정보가 남지 않도록 서버의 access log를 끈다.
+
+## 6. 로그인 실패 구분
+
+`/health`의 `oauth_flow_version: 2`로 새 로그인 처리의 배포 여부를 확인한다. Google에서 돌아온 뒤 실패하면 시작 화면에 다음 코드가 나온다.
+
+| 코드 | 확인할 단계 |
+| --- | --- |
+| `LOGIN-TOKEN` | 인증 코드 교환: 서버의 웹 OAuth 설정·Google 통신 상태 |
+| `LOGIN-IDENTITY` | Google ID 토큰의 서명·대상 클라이언트·nonce·인증된 이메일 검증 |
+| `LOGIN-PERMISSIONS` | 요청한 Classroom 읽기 권한이 실제 토큰 응답에 모두 있는지 확인 |
+| `LOGIN-STORAGE` | 계정 저장: PostgreSQL 연결·고정 암호화 키 |
+| `LOGIN-SESSION` | 계정 저장 이후 세션 발급 |
+
+로그에는 `oauth_callback_failed:단계:예외클래스`만 기록한다. 원래 예외 메시지·토큰 응답·인증 URL은 기록하지 않는다. 과거 PDF 연결 등으로 실제 허용 권한이 요청 목록보다 많아도 필수 권한을 모두 포함하면 허용한다. 실제로 빠진 권한은 거부하며, 전역 `OAUTHLIB_RELAX_TOKEN_SCOPE`를 켜지 않는다.

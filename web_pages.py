@@ -15,6 +15,11 @@ def page(title, content, bootstrap=None):
 def landing(configured, error=None):
     errors = {"google_denied": "Google 연결이 완료되지 않았어요. 계정과 읽기 권한을 확인하고 다시 연결하세요.",
               "oauth_failed": "로그인 연결을 확인하지 못했어요. 다시 시작해 주세요.",
+              "oauth_token_failed": "Google 인증을 마무리하지 못했어요. 연결 오류 코드: LOGIN-TOKEN. 운영자가 서버의 Google 연결 설정과 통신 상태를 확인해야 합니다.",
+              "oauth_identity_failed": "Google 계정 확인에 실패했어요. 연결 오류 코드: LOGIN-IDENTITY. 운영자에게 이 코드를 알려 주세요.",
+              "oauth_permissions_failed": "Classroom 읽기 권한이 모두 허용되지 않았어요. 다시 연결할 때 요청한 수업·과제·공지·자료 읽기 권한을 모두 허용해 주세요. 연결 오류 코드: LOGIN-PERMISSIONS.",
+              "oauth_storage_failed": "로그인 정보를 저장하지 못했어요. 연결 오류 코드: LOGIN-STORAGE. 운영자가 데이터베이스 연결과 암호화 설정을 확인해야 합니다.",
+              "oauth_session_failed": "로그인 세션을 만들지 못했어요. 연결 오류 코드: LOGIN-SESSION. 운영자에게 이 코드를 알려 주세요.",
               "state_expired": "로그인 시간이 지났거나 이 브라우저에서 시작한 연결이 아니에요. 다시 시작해 주세요."}
     notice = f'<p class="notice">{errors[error]}</p>' if error in errors else ""
     action = '<a class="primary" href="/auth/google">Google로 Classroom 연결 <span>↗</span></a>' if configured else '<p class="notice">웹 연결을 준비하고 있습니다. 운영자의 연결 설정이 끝나면 로그인할 수 있어요.</p>'

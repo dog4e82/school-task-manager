@@ -11,9 +11,10 @@ from urllib.parse import parse_qs, urlsplit
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from google.oauth2.credentials import Credentials
+from requests import Request as TokenRequest, Response
 
 from classroom import READ_SCOPES, SYNC_SCOPES
-from webapp import create_app
+from webapp import WEB_SCOPES, create_app
 from web_settings import Settings
 from web_store import Store
 
@@ -218,7 +219,58 @@ class WebTests(unittest.TestCase):
         flow=Mock(oauth2session=Mock(token={"id_token":"private"}))
         with patch("webapp.Flow.from_client_config",return_value=flow),patch("webapp.id_token.verify_oauth2_token",return_value={"sub":"attacker","nonce":"wrong","email_verified":True}):
             response=self.client.get("/auth/callback?state="+state+"&code=c")
-        self.assertIn("oauth_failed",response.headers["location"])
+        self.assertIn("oauth_identity_failed",response.headers["location"])
+        self.assertIsNone(self.client.cookies.get(self.settings.cookie))
+
+    def test_oauth_token_failure_has_safe_code_without_exception_secrets(self):
+        state,binding=self.store.begin_oauth({"verifier":"v","nonce":"expected","scopes":READ_SCOPES})
+        self.client.cookies.set("moa_oauth",binding,path="/auth")
+        flow=Mock()
+        flow.fetch_token.side_effect=ValueError("private-client-secret private-code private-token")
+        with patch("webapp.Flow.from_client_config",return_value=flow),self.assertLogs("moa",level="WARNING") as logs:
+            response=self.client.get("/auth/callback?state="+state+"&code=private-code")
+        self.assertEqual(response.headers["location"],"/?error=oauth_token_failed")
+        page=self.client.get(response.headers["location"]).text
+        self.assertIn("LOGIN-TOKEN",page)
+        self.assertNotIn("private-",page+str(logs.output)+response.text)
+        self.assertIn("oauth_callback_failed:token:ValueError",str(logs.output))
+        self.assertIsNone(self.client.cookies.get(self.settings.cookie))
+        self.assertIsNone(self.store.consume_oauth(state,binding))
+
+    def test_real_token_parser_with_extra_grant_completes_web_login(self):
+        start=self.client.get("/auth/google")
+        query=parse_qs(urlsplit(start.headers["location"]).query)
+        granted=WEB_SCOPES+SYNC_SCOPES
+        token=Response()
+        token.status_code=200
+        token.request=TokenRequest("POST","https://oauth2.googleapis.com/token",data="code=private-code").prepare()
+        token._content=json.dumps({"access_token":"private-access-new", "refresh_token":"private-refresh-new",
+            "id_token":"private-id-new", "token_type":"Bearer", "expires_in":3600,
+            "scope":" ".join(granted)}).encode()
+        claims={"sub":"new-real-parser", "email":"new@example.invalid", "email_verified":True,
+                "nonce":query["nonce"][0]}
+        with patch("requests_oauthlib.OAuth2Session.request",return_value=token),patch("webapp.id_token.verify_oauth2_token",return_value=claims):
+            response=self.client.get("/auth/callback",params={"state":query["state"][0],"code":"private-code"})
+        self.assertEqual(response.headers["location"],"/setup")
+        self.assertEqual(self.client.get("/setup").status_code,200)
+        session=self.store.session(self.client.cookies.get(self.settings.cookie))
+        self.assertIsNotNone(session)
+        saved=self.store.get_user(session["user_id"])["credentials"]
+        self.assertIn("https://www.googleapis.com/auth/drive.readonly",saved["scopes"])
+        self.assertNotIn("private-access-new",response.text)
+
+    def test_real_token_parser_missing_scope_never_creates_account_session(self):
+        start=self.client.get("/auth/google")
+        query=parse_qs(urlsplit(start.headers["location"]).query)
+        token=Response()
+        token.status_code=200
+        token.request=TokenRequest("POST","https://oauth2.googleapis.com/token",data="code=private-code").prepare()
+        token._content=json.dumps({"access_token":"private-access-new", "token_type":"Bearer", "expires_in":3600,
+            "scope":" ".join(WEB_SCOPES+READ_SCOPES[:-1])}).encode()
+        with patch("requests_oauthlib.OAuth2Session.request",return_value=token),patch("webapp.id_token.verify_oauth2_token") as verify:
+            response=self.client.get("/auth/callback",params={"state":query["state"][0],"code":"private-code"})
+        self.assertEqual(response.headers["location"],"/?error=oauth_permissions_failed")
+        verify.assert_not_called()
         self.assertIsNone(self.client.cookies.get(self.settings.cookie))
 
     def test_daily_generation_reservation_is_atomic_and_per_user(self):

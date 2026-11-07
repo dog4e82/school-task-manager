@@ -9,10 +9,11 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
 from requests import Request, Response
 
 import classroom
+from webapp import WEB_SCOPES, MissingLoginScopes, accept_granted_scopes
 
 
 CONFIG = {"installed": {
@@ -78,6 +79,53 @@ class ScopeTests(unittest.TestCase):
             self.assertNotIn("fake-token", str(error.exception))
             for path in (token, selected, snapshot):
                 self.assertEqual(path.read_text(encoding="utf-8"), "previous state")
+
+
+class WebScopeTests(unittest.TestCase):
+    requested = WEB_SCOPES + classroom.READ_SCOPES
+    extra = "https://www.googleapis.com/auth/drive.readonly"
+
+    def exchange(self, granted, guard=True):
+        flow = Flow.from_client_config({"web": CONFIG["installed"]}, self.requested)
+        if guard:
+            accept_granted_scopes(flow, self.requested)
+        with patch.object(flow.oauth2session, "request", return_value=response(granted)):
+            flow.fetch_token(code="fake-code")
+        return flow.credentials
+
+    def test_previous_pdf_grant_reproduces_unguarded_parser_failure(self):
+        with patch.dict(os.environ):
+            os.environ.pop("OAUTHLIB_RELAX_TOKEN_SCOPE", None)
+            with self.assertRaises(Warning):
+                self.exchange(self.requested + [self.extra], guard=False)
+
+    def test_superset_grant_passes_and_preserves_actual_scopes(self):
+        with patch.dict(os.environ):
+            os.environ.pop("OAUTHLIB_RELAX_TOKEN_SCOPE", None)
+            creds = self.exchange(self.requested + [self.extra])
+        self.assertTrue(creds.valid)
+        self.assertTrue(creds.has_scopes(self.requested))
+        self.assertIn(self.extra, creds.granted_scopes)
+        self.assertIn(self.extra, creds.scopes)
+
+    def test_exact_grant_passes(self):
+        self.assertTrue(self.exchange(self.requested).valid)
+
+    def test_missing_required_grant_rejected_even_when_global_relax_is_set(self):
+        with patch.dict(os.environ, {"OAUTHLIB_RELAX_TOKEN_SCOPE": "1"}):
+            with self.assertRaises(MissingLoginScopes):
+                self.exchange(self.requested[:-1] + [self.extra])
+
+    def test_absent_scope_not_treated_as_requested_scope(self):
+        flow = Flow.from_client_config({"web": CONFIG["installed"]}, self.requested)
+        accept_granted_scopes(flow, self.requested)
+        token = response([])
+        payload = token.json()
+        del payload["scope"]
+        token._content = json.dumps(payload).encode()
+        with patch.object(flow.oauth2session, "request", return_value=token):
+            with self.assertRaises(MissingLoginScopes):
+                flow.fetch_token(code="fake-code")
 
 
 if __name__ == "__main__":

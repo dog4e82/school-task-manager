@@ -18,6 +18,9 @@ def main():
     values = {"DATABASE_URL": settings.database_url, "APP_TOKEN_KEY": settings.token_key,
               "GOOGLE_WEB_CLIENT_ID": settings.client_id, "GOOGLE_WEB_CLIENT_SECRET": settings.client_secret,
               "WEB_AI_ENABLED": "false"}
+    # The provider URL also identifies saved analysis results when generation is off.
+    if settings.baze_base:
+        values["BAZE_BASE_URL"] = settings.baze_base
     if any("\n" in value or "\r" in value for value in values.values()):
         raise ValueError("연결 값에 줄바꿈이 포함되어 있습니다. 설정 형식을 확인하세요.")
     output = ROOT / ".local" / "render.env"
