@@ -28,3 +28,26 @@ services:
         value: "3"
       - key: WEB_AI_GLOBAL_DAILY_LIMIT
         value: "30"
+  # Public information has no application startup or database dependency.
+  # Static sites are free; there is no paid instance, disk or new database.
+  - type: web
+    name: moa-info
+    repo: https://github.com/dog4e82/school-task-manager
+    branch: moa-classroom-web
+    runtime: static
+    buildCommand: "true"
+    staticPublishPath: ./public-site
+    routes:
+      - type: rewrite
+        source: /privacy
+        destination: /privacy/index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'"

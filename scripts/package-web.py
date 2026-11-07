@@ -12,8 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 files = list(ROOT.glob("*.py"))
 files += [ROOT / name for name in ("pyproject.toml", "uv.lock", "README.md", "Dockerfile", "render.yaml", ".dockerignore", ".gitignore", ".env.example", ".python-version")]
 files += [p for directory in ("web", "docs") for p in (ROOT / directory).rglob("*") if p.is_file() and p.suffix in (".html", ".js", ".css", ".md")]
+# Generated public pages have their own narrow allowlist; never package other
+# local exports or any school examples alongside them.
+files += [ROOT / 'public-site' / path for path in ('index.html', 'privacy/index.html', 'assets/account.css', 'robots.txt')
+          if (ROOT / 'public-site' / path).is_file()]
 files += list((ROOT / "tests").glob("test_*.py"))
-files += [ROOT / "scripts" / name for name in ("package-web.py", "prepare-render-env.py", "check-postgres.py", "check-public-web.py")]
+files += [ROOT / "scripts" / name for name in ("package-web.py", "prepare-render-env.py", "check-postgres.py", "check-public-web.py", "export-public-site.py")]
 
 # Compare actual local credentials in memory; never print their values.
 private_values = set()
