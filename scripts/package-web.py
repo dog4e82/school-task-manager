@@ -13,12 +13,12 @@ files = list(ROOT.glob("*.py"))
 files += [ROOT / name for name in ("pyproject.toml", "uv.lock", "README.md", "Dockerfile", "render.yaml", ".dockerignore", ".gitignore", ".env.example", ".python-version")]
 files += [p for directory in ("web", "docs") for p in (ROOT / directory).rglob("*") if p.is_file() and p.suffix in (".html", ".js", ".css", ".md")]
 files += list((ROOT / "tests").glob("test_*.py"))
-files += [ROOT / "scripts" / "package-web.py"]
+files += [ROOT / "scripts" / name for name in ("package-web.py", "prepare-render-env.py", "check-postgres.py", "check-public-web.py")]
 
 # Compare actual local credentials in memory; never print their values.
 private_values = set()
 for name, value in dotenv_values(ROOT / ".env", encoding="utf-8-sig").items():
-    if value and any(marker in name.upper() for marker in ("KEY", "SECRET", "TOKEN", "CLIENT_ID")):
+    if value and (name.upper() == "DATABASE_URL" or any(marker in name.upper() for marker in ("KEY", "SECRET", "TOKEN", "CLIENT_ID"))):
         private_values.add(value)
 
 

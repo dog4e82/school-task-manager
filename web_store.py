@@ -16,12 +16,13 @@ def digest(value):
 
 
 class Store:
-    def __init__(self, directory, key):
+    def __init__(self, directory, key, database_url=""):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / "web.sqlite3"
+        self.database_url = database_url
         self.cipher = Fernet(key.encode() if isinstance(key, str) else key)
-        with self.db() as db:
+        with self.db(initialize=True) as db:
             db.executescript("""
               PRAGMA journal_mode=WAL;
               CREATE TABLE IF NOT EXISTS users (
@@ -39,16 +40,20 @@ class Store:
               CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 kind TEXT NOT NULL, status TEXT NOT NULL, stage TEXT NOT NULL,
-                reserved INTEGER NOT NULL, day TEXT NOT NULL, result TEXT, created INTEGER NOT NULL);
+                reserved INTEGER NOT NULL, day TEXT NOT NULL, result TEXT, created BIGINT NOT NULL);
               CREATE UNIQUE INDEX IF NOT EXISTS one_active_job_per_user ON jobs(user_id)
                 WHERE status IN ('queued','running');
             """)
 
     @contextmanager
-    def db(self):
-        connection = sqlite3.connect(self.path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
+    def db(self, initialize=False):
+        if self.database_url:
+            from postgres_storage import Connection
+            connection = Connection(self.database_url, initialize=initialize)
+        else:
+            connection = sqlite3.connect(self.path, timeout=15)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
         try:
             with connection:
                 yield connection
@@ -70,11 +75,10 @@ class Store:
 
     def consume_oauth(self, state, binding):
         with self.db() as db:
-            row = db.execute("SELECT * FROM oauth_states WHERE id=? AND binding=? AND expires>?",
+            row = db.execute("DELETE FROM oauth_states WHERE id=? AND binding=? AND expires>? RETURNING payload",
                              (digest(state), digest(binding), int(time.time()))).fetchone()
             if row is None:
                 return None
-            db.execute("DELETE FROM oauth_states WHERE id=?", (digest(state),))
         return self.decrypt(row["payload"])
 
     def save_user(self, subject, email, name, credentials):
@@ -127,6 +131,7 @@ class Store:
 
     def save_personal(self, user_id, item_id, patch):
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT data FROM personal WHERE user_id=? AND item_id=?", (user_id, item_id)).fetchone()
             value = {**(json.loads(row[0]) if row else {}), **patch}
             db.execute("INSERT INTO personal VALUES (?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET data=excluded.data",
@@ -145,7 +150,7 @@ class Store:
                 total = db.execute("SELECT COALESCE(SUM(reserved),0) FROM jobs WHERE day=? AND kind='analyze'", (day,)).fetchone()[0]
                 if total + limit > global_limit:
                     raise ValueError("global_limit")
-            db.execute("INSERT INTO jobs VALUES (?,?,?,'queued','대기 중',?,?,NULL,?)", (job_id, user_id, kind, limit, day, int(time.time())))
+            db.execute("INSERT INTO jobs VALUES (?,?,?,'queued','대기 중',?,?,NULL,?)", (job_id, user_id, kind, limit, day, time.time_ns() // 1000))
         return job_id
 
     def finish_job(self, user_id, job_id, status, stage, result=None):
@@ -162,7 +167,7 @@ class Store:
 
     def latest_job(self, user_id):
         with self.db() as db:
-            row = db.execute("SELECT id FROM jobs WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 1", (user_id,)).fetchone()
+            row = db.execute("SELECT id FROM jobs WHERE user_id=? ORDER BY created DESC,id DESC LIMIT 1", (user_id,)).fetchone()
         return self.job(user_id, row[0]) if row else None
 
     def recover_jobs(self):
@@ -171,6 +176,7 @@ class Store:
 
     def delete_user(self, user_id):
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM jobs WHERE user_id=? AND status IN ('queued','running')", (user_id,)).fetchone():
                 raise ValueError("job_running")
             db.execute("DELETE FROM users WHERE id=?", (user_id,))

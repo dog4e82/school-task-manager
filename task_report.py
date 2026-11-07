@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from classroom_data import SEOUL
 from classroom_pdf import references
 from notice_ai import Cache, DEFAULT_MODEL, prepare
+from task_extraction import derive_items
 
 
 ROOT = Path(__file__).resolve().parent
@@ -34,30 +35,22 @@ def day_of(value):
 def gather(jobs, cache, today):
     groups = {name: [] for name in ("tasks", "uncertain", "optional", "past", "reference", "pending")}
     analyzed = 0
+    posts = [job["post"] for job in jobs]
     for job in jobs:
         post, record = job["post"], cache.get(job["key"])
-        if record and record["status"] == "success":
+        cached = bool(record and record["status"] == "success")
+        if cached:
             analyzed += 1
-            items = record["result"]["items"]
-            for item in items:
-                status = item.get("proposed_task_status", item.get("task_status", "unknown"))
-                due = item.get("deadline") or item.get("proposed_deadline")
-                api_due = bool(due and post.get("due_at") and day_of(due) == day_of(post["due_at"])
-                               and item.get("deadline_kind", "submission") == "submission" and status == "required")
-                if api_due:
-                    due = post["due_at"]
-                if not due and len(items) == 1 and status == "required":
-                    due = post.get("due_at")
-                    api_due = bool(due)
-                row = {"post": post, "item": item, "due": due, "status": status, "analyzed": True, "api_due": api_due}
-                group = "reference" if status == "reference" else (
-                    "past" if day_of(due) and day_of(due) < today else (
-                        "tasks" if status == "required" else "optional" if status == "optional" else "uncertain"))
-                groups[group].append(row)
-        elif post["source"] == "coursework":
-            row = {"post": post, "item": {"title": post.get("title", ""), "action": post.get("title", "")},
-                   "due": post.get("due_at"), "status": "pending", "analyzed": False}
-            group = "pending" if row["due"] is None else "past" if day_of(row["due"]) < today else "uncertain"
+        items = derive_items(post, record["result"]["items"] if cached else [], posts)
+        for item in items:
+            status = item.get("proposed_task_status", item.get("task_status", "unknown"))
+            due = item.get("resolved_due")
+            row = {"post":post,"item":item,"due":due,"status":status,
+                   "analyzed":cached and not item.get("source_extracted"),"api_due":item.get("api_due",False)}
+            group = "reference" if status == "reference" else (
+                "past" if day_of(due) and day_of(due)<today else (
+                    "pending" if status == "pending" and not due else
+                    "tasks" if status == "required" else "optional" if status == "optional" else "uncertain"))
             groups[group].append(row)
     for rows in groups.values():
         rows.sort(key=lambda row: (row["due"] is None, row["due"] or "", row["post"].get("course_name", "")))

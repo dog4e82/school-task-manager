@@ -1,25 +1,20 @@
-# Persistent storage is required for account sessions, encrypted OAuth tokens and records.
-# This blueprint uses a paid disk-compatible service; creating it requires the owner's billing approval.
+# Free web service. Persistent account state and analysis live in external PostgreSQL.
 services:
   - type: web
     name: moa-classroom
     repo: https://github.com/dog4e82/school-task-manager
     branch: moa-classroom-web
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: uv sync --frozen --no-dev --no-install-project
     startCommand: uv run --no-sync webapp.py serve --host 0.0.0.0
     healthCheckPath: /health
-    disk:
-      name: moa-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.7
       - key: APP_DATA_DIR
-        value: /var/data
-      - key: APP_BASE_URL
+        value: /tmp/moa
+      - key: DATABASE_URL
         sync: false
       - key: APP_TOKEN_KEY
         sync: false

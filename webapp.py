@@ -66,9 +66,14 @@ class PersonalBody(BaseModel):
 
 def create_app(settings=None):
     settings = settings or Settings.load()
-    store = Store(settings.data_dir, settings.token_key)
+    store = Store(settings.data_dir, settings.token_key, settings.database_url)
     cache_path = settings.data_dir / "analysis.sqlite3"
-    Cache(cache_path).close()
+    def analysis_cache(readonly=False):
+        if settings.database_url:
+            from postgres_storage import PostgresCache
+            return PostgresCache(settings.database_url, readonly=readonly)
+        return SavedAnalyses(cache_path) if readonly else Cache(cache_path)
+    analysis_cache().close()
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="moa-job")
 
     @asynccontextmanager
@@ -140,7 +145,7 @@ def create_app(settings=None):
         snapshot = store.snapshot(user_id)
         if snapshot is None:
             raise HTTPException(409, "먼저 모아 볼 수업을 선택해 주세요.")
-        cache = SavedAnalyses(cache_path)
+        cache = analysis_cache(readonly=True)
         try:
             return build_data(snapshot, cache, settings.baze_base)
         finally:
@@ -192,7 +197,7 @@ def create_app(settings=None):
                 raise ValueError("snapshot_missing")
             store.finish_job(user_id, job_id, "running", "현재 안내를 AI로 정리 중 · 저장된 결과는 재사용합니다")
             jobs = prepare(snapshot, DEFAULT_MODEL, settings.baze_base)
-            cache = Cache(cache_path)
+            cache = analysis_cache()
             report = run_analysis(Client(settings.baze_base, settings.baze_key), cache, jobs, DEFAULT_MODEL, limit=limit)
             store.finish_job(user_id, job_id, "done" if not report["failed"] else "failed",
                              "정리 완료" if not report["failed"] else "일부 결과를 확인하지 못했어요. 저장된 결과부터 확인하세요.", report)
@@ -432,7 +437,11 @@ def main():
             source = ROOT / ".local" / "classroom" / "analysis.sqlite3"
             if not source.exists():
                 raise ValueError("기존 분석 캐시가 없습니다.")
-            target = Cache(settings.data_dir / "analysis.sqlite3")
+            if settings.database_url:
+                from postgres_storage import PostgresCache
+                target = PostgresCache(settings.database_url)
+            else:
+                target = Cache(settings.data_dir / "analysis.sqlite3")
             with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as legacy:
                 rows = legacy.execute("SELECT * FROM analyses WHERE status='success' AND model=?", (DEFAULT_MODEL,)).fetchall()
             legacy.close()

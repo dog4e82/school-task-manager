@@ -25,7 +25,7 @@ JSON 파일 대신 `GOOGLE_WEB_CLIENT_ID`와 `GOOGLE_WEB_CLIENT_SECRET` 환경�
 
 ## 2. 저장 방식과 공통 분석
 
-웹 상태는 기본 `.local/web/` 아래에 있고 `APP_DATA_DIR`로 변경할 수 있다. Google 인증정보는 Fernet으로 암호화하며 세션 쿠키에는 무작위 값만 저장한다. 쿠키는 HttpOnly/SameSite=Lax이고 HTTPS에서는 Secure 및 `__Host-` 접두사를 사용한다. Google 로그인에는 브라우저에 묶인 일회용 state, PKCE, OIDC nonce와 Google 서명 검증을 사용한다.
+로컬 웹 상태는 기본 `.local/web/` 아래에 있고 `APP_DATA_DIR`로 변경할 수 있다. `DATABASE_URL`을 설정한 무료 웹 배포는 계정 기록과 분석 캐시를 외부 PostgreSQL에 보관한다. Google 인증정보는 Fernet으로 암호화하며 세션 쿠키에는 무작위 값만 저장한다. 쿠키는 HttpOnly/SameSite=Lax이고 HTTPS에서는 Secure 및 `__Host-` 접두사를 사용한다. Google 로그인에는 브라우저에 묶인 일회용 state, PKCE, OIDC nonce와 Google 서명 검증을 사용한다.
 
 모든 데이터·작업·개인 기록 API는 현재 세션의 사용자만 조회한다. 수업 ID를 클라이언트에서 보내도 서버가 해당 Google 계정의 수업 목록으로 접근 권한을 다시 검증한다. 미로그인 방문자는 기존 학교 수집본을 받지 않는다. 정적 파일은 공개 소개 화면의 두 자산만 허용하며 `.local`, `.env`, OAuth JSON을 서빙하지 않는다.
 
@@ -45,37 +45,50 @@ uv run webapp.py seed-cache
 
 1회 최대 3건, 기본 사용자별 하루 3건, 서버 전체 하루 30건의 생성 예약 상한을 둔다. 예약은 DB 트랜잭션으로 잡으며 실패·중단 시에도 보수적으로 소비한 것으로 남긴다. 날짜 경계는 한국 시간이다. `WEB_AI_DAILY_LIMIT`와 `WEB_AI_GLOBAL_DAILY_LIMIT`로 상한을 설정할 수 있다. 모델을 클라이언트가 지정하거나 자동 대체할 수 없다. 불확실·실패 호출을 자동 재시도하지 않는다. 로그인·목록 열기·메모 저장은 생성 호출을 실행하지 않는다.
 
-## 4. 공개 배포
+## 4. 무료 공개 배포
 
-Python 웹 서버를 실행할 수 있는 호스팅 계정이 필요하다. 현재 Render 연결이 제안된 상태이며, 계정 연결과 실제 배포는 아직 완료되지 않았다. [Render FastAPI 배포 안내](https://render.com/docs/deploy-fastapi)에 따라 저장소를 연결하거나 Dockerfile을 사용할 수 있다.
+무료 구성은 Render **Free 웹 서비스 + Neon Free PostgreSQL**이다. `render.yaml`은 `plan: free`이며 유료 디스크를 만들지 않는다. Render의 무료 PostgreSQL은 30일 후 만료되므로 장기 저장소로 사용하지 않는다. Render 무료 웹 서비스는 15분 동안 요청이 없으면 중지되고 다음 접속 시 약 1분의 시작 시간이 발생할 수 있다. 무료 사용량 한도도 적용된다. [Render 무료 서비스 안내](https://render.com/docs/free), [Neon 무료 플랜](https://neon.com/pricing).
 
-배포 소스는 `dog4e82/school-task-manager` 저장소의 **`moa-classroom-web` 브랜치**를 사용한다. 기존 `main`의 별도 프로그램은 가져오지 않는다. Blueprint도 같은 브랜치를 지정한다. 배포 전 `uv run scripts/package-web.py`로 로컬 인증정보와 소스의 일치 여부를 검사하고, 계정 데이터가 제외된 배포 묶음을 만든다. 검증 명령에 필요한 테스트도 포함한다.
+계정·암호화된 토큰·세션·수집본·개인 기록·작업·분석 캐시는 PostgreSQL의 `moa` 스키마에 보존한다. 원본 PDF 다운로드 캐시만 임시 디스크에 있으며, 추출해 저장한 페이지 텍스트는 계정별 수집본 안에 보존한다. 무료 DB 사용량 한도를 확인하고 웹 서버 인스턴스는 1개로 운영한다.
 
-2026-11-06 로컬 확인 결과: 실제 웹 로그인 사용자 1명, 계정별 수집본 1개를 확인했다. 이는 로컬 연결 검증이며, 외부 접속과 두 번째 실제 계정의 연결 성공은 아직 검증하지 않았다. 현재 등록된 Google 콜백은 로컬 주소뿐이다.
+배포 소스는 `dog4e82/school-task-manager` 저장소의 **`moa-classroom-web` 브랜치**다. 기존 `main`의 별도 프로그램은 가져오지 않는다.
 
-`render.yaml`은 영구 디스크가 가능한 **유료 starter 서비스** 예시다. 디스크는 세션·토큰·개인 기록을 재시작 후에도 보존하기 위해 사용한다. 소유자가 계정 연결과 요금제를 확인하기 전에는 이 Blueprint로 유료 리소스를 생성하지 않는다. [Render 영구 디스크 안내](https://render.com/docs/disks)를 확인한다. Docker 빌드는 현재 작업 환경에 Docker가 없어 실제 이미지 빌드로 검증하지 못했다. uv 의존성 설치와 앱 실행·웹 API는 로컬에서 검증한다.
+1. [Neon 콘솔](https://console.neon.tech)에서 Free 프로젝트를 만들고 Connect에서 PostgreSQL 연결 문자열을 복사한다. 비밀 연결 문자열을 로컬 Git 제외 파일 `.env`의 `DATABASE_URL`에 저장한다. 채팅이나 Git에 붙이지 않는다.
+2. 프로젝트 폴더에서 아래 명령을 실행한다. 실제 DB 검사는 무작위 임시 검증 스키마 안에서 가짜 데이터로만 실행하고 그 스키마를 정리한다. 학교 수집본이나 실제 Google 토큰은 검사에 사용하지 않는다.
 
-호스팅의 서버 환경변수에 아래를 설정한다.
+```powershell
+uv run scripts/check-postgres.py
+uv run scripts/prepare-render-env.py
+```
+
+두 번째 명령은 기존 웹 OAuth 설정과 암호화 키를 읽어 Git 제외 파일 `.local/render.env`를 만든다. 비밀값을 터미널에 출력하지 않는다. 파일의 값은 Render 환경변수 설정에만 사용한다.
+
+3. Render에서 **New → Blueprint → school-task-manager 연결**을 선택한다. Branch는 `moa-classroom-web`, Blueprint Path는 `render.yaml`이다. 필요한 환경변수 값을 `.local/render.env`에서 설정하고 서비스가 **Free**인지 확인한 뒤 Deploy Blueprint를 실행한다. 유료 워크스페이스 업그레이드나 유료 인스턴스를 선택하지 않는다. [공식 Blueprint 절차](https://render.com/docs/infrastructure-as-code).
 
 | 변수 | 설정 |
 | --- | --- |
-| `APP_BASE_URL` | 실제 HTTPS 사이트 원점. 끝에 경로나 `/` 없이 입력 |
-| `APP_DATA_DIR` | 영구 디스크 경로. Render 예시는 `/var/data` |
-| `APP_TOKEN_KEY` | 영구 보관하는 Fernet 키. 교체하면 기존 Google 토큰을 복호화할 수 없음 |
-| `GOOGLE_WEB_CLIENT_ID` | 웹 앱용 Google OAuth Client ID |
-| `GOOGLE_WEB_CLIENT_SECRET` | 웹 앱용 Secret. 호스팅의 비밀 환경변수로 저장 |
-| `WEB_AI_ENABLED` | 초기에는 `false`. BAZE 설정 후 명시적으로 활성화 |
-| `BAZE_BASE_URL`, `BAZE_API_KEY` | AI를 사용할 때만 설정. 키는 비밀 환경변수 |
+| `DATABASE_URL` | Neon PostgreSQL 비밀 연결 문자열. TLS 연결 사용 |
+| `APP_TOKEN_KEY` | 고정 Fernet 키. `.local/render.env`에서 설정. 교체하면 기존 토큰 복호화 불가 |
+| `GOOGLE_WEB_CLIENT_ID` | 웹 앱용 OAuth Client ID |
+| `GOOGLE_WEB_CLIENT_SECRET` | 웹 앱용 OAuth Secret |
+| `APP_BASE_URL` | Render에서는 플랫폼의 `RENDER_EXTERNAL_URL`을 자동 사용. 사용자 도메인일 때만 명시적으로 설정 |
+| `APP_DATA_DIR` | 임시 PDF 캐시 경로 `/tmp/moa`. 계정 기록은 외부 DB에 저장 |
+| `WEB_AI_ENABLED` | 초기 `false`. BAZE 설정과 별도 활성화 전에는 생성 호출 없음 |
+| `BAZE_BASE_URL`, `BAZE_API_KEY` | AI 기능을 활성화할 때만 서버에서 설정 |
 
-로컬 테스트에서 생성한 키를 호스팅 설정으로 복사할 때 터미널에 출력하지 않으려면 다음처럼 클립보드에만 복사할 수 있다. 값은 공유하거나 Git에 저장하지 않는다.
+Render 환경에서 `DATABASE_URL`을 빠뜨리면 서버가 시작되지 않는다. 임시 SQLite로 자동 대체하여 개인 기록을 잃는 동작을 허용하지 않는다. 기본 로컬 웹 실행과 CLI는 SQLite를 계속 지원한다. 암호화 키는 DB와 별도로 Render 환경변수에 고정 보관한다.
+
+4. 배포 후 실제 HTTPS 주소에 대해 아래 읽기 전용 검사를 실행한다. 이 검사는 실제 Google 로그인 완료를 대신 검증하지 않는다.
 
 ```powershell
-Get-Content -Raw .local\web\token-encryption.key | Set-Clipboard
+uv run scripts/check-public-web.py https://실제서비스주소.onrender.com
 ```
 
-Google 웹 클라이언트의 승인된 리디렉션 URI에는 실제 사이트의 `https://사이트주소/auth/callback`도 추가한다. Google Branding의 홈페이지와 개인정보처리방침 주소는 실제 `/`, `/privacy`로 설정하고 운영자 연락처·도메인 소유권도 등록한다.
+5. Google 웹 클라이언트의 승인된 리디렉션 URI에 실제 사이트의 `https://실제서비스주소.onrender.com/auth/callback`을 추가한다. Google Branding의 홈페이지와 개인정보처리방침 주소는 실제 `/`, `/privacy`로 설정하고 운영자 연락처·도메인 소유권도 등록한다.
 
-테스트 모드에서는 승인한 테스트 사용자만 연결할 수 있다. 누구나 연결하는 공개 운영은 Google의 Audience/Publishing 상태를 변경하고 사용하는 범위에 필요한 검증을 진행해야 한다. 학교 관리자의 외부 앱 제한은 별도로 적용될 수 있다. 이 설정은 프로그램 코드나 BAZE 모델 변경으로 우회할 수 없다. [Google 웹 OAuth 안내](https://developers.google.com/identity/protocols/oauth2/web-server), [민감 범위 검증 안내](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification)를 참고한다.
+테스트 모드에서는 승인한 테스트 사용자만 연결할 수 있다. 누구나 연결하는 공개 운영은 Google Audience/Publishing 상태를 변경하고 필요한 범위 검증을 진행해야 한다. 학교 관리자의 외부 앱 제한은 별도로 적용될 수 있다. [Google 웹 OAuth 안내](https://developers.google.com/identity/protocols/oauth2/web-server), [민감 범위 검증 안내](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
+
+2026-11-06 로컬에서는 실제 웹 로그인 사용자 1명, 계정별 수집본 1개를 확인했다. 가짜 데이터로 실제 PostgreSQL 저장·계정 분리·동시 실행 검사도 통과했다. 공개 주소의 실제 로그인과 두 번째 계정 연결은 별도로 검증해야 한다. Docker가 현재 작업 환경에 없어 이미지 빌드는 검증하지 않았다.
 
 ## 5. 검증 명령
 

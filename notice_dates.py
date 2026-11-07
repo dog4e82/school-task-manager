@@ -14,7 +14,7 @@ TIME = re.compile(r"\s*(?P<period>오전|오후)?\s*(?P<hour>\d{1,2})"
 CUE = re.compile(r"(?:신청|접수|등록|모집)\s*(?:기간|기한|마감(?:일|시간)?|종료(?:일|시간)?)\s*[:：]?")
 RELATIVE = re.compile(r"(?:이번|다음)\s*주\s*[월화수목금토일]요일|내일|오늘")
 TEACHER = re.compile(r"선생님|교사|담임|연구실|T에게|말씀|말해|알려|의사\s*(?:전달|표시)")
-CONNECTOR = re.compile(r"\s*[~∼〜–—－-]\s*")
+CONNECTOR = re.compile(r"\s*(?:[~∼〜–—－-]|부터)\s*")
 
 
 def deadline_past(value, today, reference=None):

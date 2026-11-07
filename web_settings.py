@@ -25,6 +25,7 @@ class Settings:
     ai_enabled: bool = False
     ai_daily_limit: int = 3
     ai_global_daily_limit: int = 30
+    database_url: str = ""
 
     @property
     def secure(self):
@@ -51,12 +52,17 @@ class Settings:
     @classmethod
     def load(cls):
         load_dotenv(ROOT / ".env", override=False, encoding="utf-8-sig")
-        base = (os.environ.get("APP_BASE_URL") or "http://127.0.0.1:8000").strip().rstrip("/")
+        base = (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "http://127.0.0.1:8000").strip().rstrip("/")
         parsed = urlsplit(base)
         if (not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path
                 or parsed.scheme not in ("http", "https")
                 or (parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"))):
             raise ValueError("APP_BASE_URL은 HTTPS 주소 또는 로컬 테스트용 http://127.0.0.1:8000이어야 합니다.")
+        database_url = os.environ.get("DATABASE_URL", "").strip()
+        if os.environ.get("RENDER_EXTERNAL_URL") and not database_url:
+            raise ValueError("무료 Render 배포에는 DATABASE_URL을 설정하세요. 임시 SQLite에 개인 기록을 저장하지 않습니다.")
+        if database_url and urlsplit(database_url).scheme not in ("postgres", "postgresql"):
+            raise ValueError("DATABASE_URL에는 PostgreSQL 연결 주소를 설정하세요. 값은 출력하지 않습니다.")
         directory = Path(os.environ.get("APP_DATA_DIR") or ROOT / ".local" / "web").resolve()
         key = os.environ.get("APP_TOKEN_KEY", "").strip()
         if not key:
@@ -90,4 +96,5 @@ class Settings:
                    client_secret, os.environ.get("BAZE_BASE_URL", "").strip(),
                    os.environ.get("BAZE_API_KEY", "").strip(), os.environ.get("WEB_AI_ENABLED", "false").lower() == "true",
                    max(1, min(30, int(os.environ.get("WEB_AI_DAILY_LIMIT") or "3"))),
-                   max(1, min(3000, int(os.environ.get("WEB_AI_GLOBAL_DAILY_LIMIT") or "30"))))
+                   max(1, min(3000, int(os.environ.get("WEB_AI_GLOBAL_DAILY_LIMIT") or "30"))),
+                   database_url)

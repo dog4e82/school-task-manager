@@ -35,6 +35,8 @@ def identifier(value):
 def build_data(snapshot, cache, provider, today=None):
     today = today or datetime.now(SEOUL).date()
     jobs = prepare(snapshot, DEFAULT_MODEL, provider)
+    if callable(getattr(type(cache), "preload", None)):
+        cache.preload([job["key"] for job in jobs])
     groups, analyzed = gather(jobs, cache, today)
     posts = []
     for job in jobs:
@@ -55,13 +57,19 @@ def build_data(snapshot, cache, provider, today=None):
             item, raw = row["item"], row["post"]
             source_key = post_key(raw)
             api_due = bool(row.get("api_due") or (not row["analyzed"] and raw.get("due_at")))
-            tasks.append({"id": identifier(source_key + "\n" + item.get("title", "") + "\n" + (item.get("task_evidence") or "")),
+            task_key = item.get("source_item_key") or (item.get("title", "") + "\n" + (item.get("task_evidence") or ""))
+            tasks.append({"id": identifier(source_key + "\n" + task_key),
                           "postId": source_key, "courseId": raw["course_id"], "courseName": raw.get("course_name", ""),
                           "title": item.get("title", ""), "action": item.get("action") or item.get("title", ""),
                           "status": row["status"], "group": group, "due": row["due"], "apiDue": api_due,
                           "analyzed": row["analyzed"], "audience": item.get("audience", ""),
                           "deadlineExpression": item.get("deadline_expression"), "deadlineKind": item.get("deadline_kind", "submission"),
-                          "deadlineConfirmed": confirmed_date(item) or api_due,
+                          "deadlineConfirmed": item.get("resolved_confirmed", confirmed_date(item) or api_due),
+                          "sourceExtracted": bool(item.get("source_item_key")),
+                          "scheduleType": item.get("schedule_type", "dated" if row["due"] else "unknown"),
+                          "scheduleStart": item.get("schedule_start"), "scheduleText": item.get("schedule_text"),
+                          "deadlineAlternatives": item.get("deadline_alternatives", []),
+                          "relatedDeadline": item.get("related_deadline"),
                           "evidence": item.get("task_evidence"), "evidenceSource": item.get("task_evidence_source"),
                           "deadlineEvidence": item.get("deadline_evidence"), "deadlineEvidenceSource": item.get("deadline_evidence_source"),
                           "flags": item.get("review_flags", [])})
