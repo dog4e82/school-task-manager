@@ -6,7 +6,8 @@ import sqlite3
 
 import psycopg
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.pq import TransactionStatus
 
 from notice_ai import Cache
 
@@ -44,6 +45,12 @@ class Connection:
         self.raw = None
         try:
             config = conninfo_to_dict(dsn)
+            # Schema creation uses a direct endpoint. Request traffic stays pooled.
+            host = config.get("host", "")
+            labels = host.split(".")
+            if initialize and host.endswith(".neon.tech") and labels[0].endswith("-pooler"):
+                config["host"] = ".".join([labels[0][:-7], *labels[1:]])
+                dsn = make_conninfo(**config)
             mode = config.get("sslmode", "require")
             if mode not in ("require", "verify-ca", "verify-full"):
                 raise ValueError("TLS is required")
@@ -52,13 +59,18 @@ class Connection:
             self.raw.read_only = readonly
             if initialize:
                 self.raw.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(SCHEMA)))
-            self.raw.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(SCHEMA)))
             self.raw.commit()
         except (psycopg.Error, ValueError, TypeError):
             if self.raw is not None:
                 self.raw.close()
             raise ValueError("DATABASE_URL의 PostgreSQL 연결·TLS·접근 권한을 확인하세요. 연결 문자열은 출력하지 않습니다.") from None
         self.total_changes = 0
+        self.schema = SCHEMA
+
+    def prepare_transaction(self):
+        if self.raw.info.transaction_status == TransactionStatus.IDLE:
+            # PgBouncer transaction pooling does not preserve session SET values.
+            self.raw.execute(sql.SQL("SET LOCAL search_path TO {}").format(sql.Identifier(self.schema)))
 
     def __enter__(self):
         return self
@@ -72,6 +84,7 @@ class Connection:
         if query is None:
             return None
         try:
+            self.prepare_transaction()
             cursor = self.raw.execute(query, parameters or None)
         except psycopg.IntegrityError:
             raise sqlite3.IntegrityError("Database constraint rejected the operation") from None
@@ -80,6 +93,7 @@ class Connection:
         return cursor
 
     def executemany(self, statement, rows):
+        self.prepare_transaction()
         cursor = self.raw.cursor()
         cursor.executemany(translate(statement),rows)
         self.total_changes += max(0,cursor.rowcount)

@@ -42,6 +42,12 @@ def main():
             with store.db() as db:
                 raw = db.execute("SELECT credentials FROM users WHERE id=?",(user,)).fetchone()[0]
             check("credentials_encrypted",b"synthetic-probe-token" not in bytes(raw))
+            with Connection(dsn) as transactional:
+                namespace=transactional.execute("SELECT current_schema()").fetchone()[0]
+                transactional.commit()
+                again=transactional.execute("SELECT current_schema()").fetchone()[0]
+                check("schema_survives_transaction_pool_reassignment",namespace==schema and again==schema)
+            transactional.close()
             store.save_snapshot(user,{"synthetic":True})
             check("snapshot_owner",store.snapshot(other) is None)
             with ThreadPoolExecutor(max_workers=2) as pool:

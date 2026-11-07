@@ -20,3 +20,5 @@ credentials.web.json
 client_secret*.json
 token.json
 .local/
+.neon
+.codex/config.toml
