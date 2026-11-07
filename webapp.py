@@ -36,7 +36,7 @@ from task_priority import prioritize_posts
 from ui import render_html
 from ui_data import build_data, SavedAnalyses
 from web_pages import landing, setup, privacy
-from web_settings import Settings, ROOT
+from web_settings import Settings, ROOT, google_config_fingerprints
 from web_store import Store, digest
 
 
@@ -93,6 +93,11 @@ class PersonalBody(BaseModel):
 def create_app(settings=None):
     settings = settings or Settings.load()
     store = Store(settings.data_dir, settings.token_key, settings.database_url)
+    if settings.configured:
+        try:
+            store.record_oauth_config(google_config_fingerprints(settings.client_id, settings.client_secret, settings.token_key))
+        except Exception:
+            LOGGER.warning('oauth_config_diagnostics_unavailable')
     cache_path = settings.data_dir / "analysis.sqlite3"
     def analysis_cache(readonly=False):
         if settings.database_url:
@@ -266,7 +271,7 @@ def create_app(settings=None):
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 3}
+                "oauth_flow_version": 4}
 
     @app.get("/privacy", response_class=HTMLResponse)
     def privacy_page():

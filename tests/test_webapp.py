@@ -15,7 +15,7 @@ from requests import Request as TokenRequest, Response
 
 from classroom import READ_SCOPES, SYNC_SCOPES
 from webapp import WEB_SCOPES, create_app
-from web_settings import Settings
+from web_settings import Settings, google_config_fingerprints
 from web_store import Store
 
 
@@ -281,6 +281,15 @@ class WebTests(unittest.TestCase):
                 start=self.client.get('/auth/google')
         self.assertEqual(start.status_code,303)
         self.assertNotIn('private-secret',str(logs.output))
+
+    def test_runtime_config_markers_are_private_and_never_store_secret_text(self):
+        expected=google_config_fingerprints(self.settings.client_id,self.settings.client_secret,self.settings.token_key)
+        with self.store.db() as db:
+            stored={row['component']:row['fingerprint'] for row in db.execute('SELECT component,fingerprint FROM oauth_runtime_config').fetchall()}
+        self.assertEqual(stored,expected)
+        self.assertNotIn(self.settings.client_secret,str(stored))
+        self.assertEqual(self.client.get('/api/oauth-config').status_code,404)
+        self.assertNotIn(expected['client_secret'],self.client.get('/health').text)
 
     def test_real_token_parser_missing_scope_never_creates_account_session(self):
         start=self.client.get("/auth/google")

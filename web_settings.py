@@ -2,6 +2,8 @@
 
 import os
 import json
+import hashlib
+import hmac
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -11,6 +13,21 @@ from dotenv import load_dotenv
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def oauth_env_value(name):
+    value = os.environ.get(name, "").strip()
+    if len(value) >= 2 and value[0] in {'"', "'"} and value[-1] == value[0]:
+        value = value[1:-1].strip()
+    if '\n' in value or '\r' in value:
+        raise ValueError(name + "에는 값만 한 줄로 입력하세요.")
+    return value
+
+
+def google_config_fingerprints(client_id, client_secret, token_key):
+    """Private keyed comparison markers; never publish these in an endpoint."""
+    return {name: hmac.new(token_key.encode(), b'moa/oauth-config/v1/' + name.encode() + b'\0' + value.encode(), hashlib.sha256).hexdigest()
+            for name, value in [('client_id', client_id), ('client_secret', client_secret), ('encryption_key', 'key-check')]}
 
 
 @dataclass
@@ -81,8 +98,8 @@ class Settings:
             Fernet(key.encode())
         except (ValueError, TypeError):
             raise ValueError("APP_TOKEN_KEY 형식이 올바르지 않습니다.") from None
-        client_id = os.environ.get("GOOGLE_WEB_CLIENT_ID", "").strip()
-        client_secret = os.environ.get("GOOGLE_WEB_CLIENT_SECRET", "").strip()
+        client_id = oauth_env_value("GOOGLE_WEB_CLIENT_ID")
+        client_secret = oauth_env_value("GOOGLE_WEB_CLIENT_SECRET")
         client_path = Path(os.environ.get("GOOGLE_WEB_CLIENT_FILE") or ROOT / "credentials.web.json")
         if not client_id and not client_secret and client_path.exists():
             try:

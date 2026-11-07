@@ -46,6 +46,8 @@ class Store:
               CREATE TABLE IF NOT EXISTS login_diagnostics (
                 stage TEXT NOT NULL, result TEXT NOT NULL, attempts INTEGER NOT NULL,
                 last_seen BIGINT NOT NULL, PRIMARY KEY(stage,result));
+              CREATE TABLE IF NOT EXISTS oauth_runtime_config (
+                component TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, updated BIGINT NOT NULL);
             """)
 
     @contextmanager
@@ -65,6 +67,16 @@ class Store:
 
     def encrypt(self, value):
         return self.cipher.encrypt(json.dumps(value).encode())
+
+    def record_oauth_config(self, fingerprints):
+        if (set(fingerprints) != {'client_id', 'client_secret', 'encryption_key'}
+                or any(len(value) != 64 or any(c not in '0123456789abcdef' for c in value) for value in fingerprints.values())):
+            raise ValueError('invalid_config_marker')
+        with self.db() as db:
+            for component, fingerprint in fingerprints.items():
+                db.execute('INSERT INTO oauth_runtime_config VALUES (?,?,?) '
+                           'ON CONFLICT(component) DO UPDATE SET fingerprint=excluded.fingerprint,updated=excluded.updated',
+                           (component, fingerprint, time.time_ns() // 1000))
 
     def record_login(self, stage, result):
         """Bounded aggregate operational counters, with no account identifiers."""
