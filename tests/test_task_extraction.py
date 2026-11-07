@@ -39,6 +39,32 @@ class TaskExtractionTests(unittest.TestCase):
     def test_instruction_checklist_is_not_split_into_assignments(self):
         self.assertEqual(blocks("과제: 보고서\n조건1. PDF로 제출\n조건2. 이름 표시\n조건3. 2페이지 이내"),[])
         self.assertEqual(blocks("[수업자료]\n1. 입력\n2. 출력\n[참고자료]\n영상"),[])
+        self.assertEqual(blocks("보고서 제출\n1. 보고서 PDF로 제출\n2. 자료 출처 표시\n제출 기한: 2026.11.20."), [])
+
+    def test_numbered_work_has_separate_dates_without_ai(self):
+        p = post("1. 탐구 보고서 제출\n제출 기한: 2026.11.12.\n보고서를 제출하세요.\n"
+                 "2. 프로그램 코드 제출\n제출 기한: 2026.11.19.\n코드를 제출하세요.", source='coursework')
+        rows = derive_items(p, [], [p])
+        self.assertEqual([r['title'] for r in rows], ['탐구 보고서 제출', '프로그램 코드 제출'])
+        self.assertEqual([r['resolved_due'] for r in rows], ['2026-11-12', '2026-11-19'])
+
+    def test_splitting_dated_work_does_not_drop_an_undated_child(self):
+        p = post('1. 보고서 제출\n제출 기한: 2026.11.12.\n보고서를 제출하세요.\n'
+                 '2. 코드 제출\n제출 기한: 2026.11.19.\n코드를 제출하세요.\n'
+                 '3. 탐구 자료 제출\n자료를 제출하세요. 마감은 추후 공지합니다.', source='coursework')
+        rows = derive_items(p, [], [p])
+        self.assertEqual(len(rows), 3)
+        self.assertIsNone(rows[2]['resolved_due'])
+
+    def test_distinct_ai_deadline_kinds_never_share_a_completion_id(self):
+        p = post('참여 희망자는 교내 신청과 외부 접수를 해주세요.')
+        children = [item('참여 신청', p['text'], kind=kind, status='optional')
+                    for kind in ('registration', 'local_signup')]
+        cache = Mock()
+        cache.get.return_value = {'status': 'success', 'result': {'items': children}}
+        result = build_data({'courses': [], 'assignments': [], 'announcements': [p]}, cache, '', date(2026, 11, 6))
+        self.assertEqual(len(result['tasks']), 2)
+        self.assertEqual(len({t['id'] for t in result['tasks']}), 2)
 
     def test_repeated_assessment_fields_split_one_notice(self):
         text=("[수행평가]\n1) 평가영역(주제): 정렬과 탐색\n2) 일시: 5월 마지막주 수업 시간\n3) 평가내용: 정렬 코드 제출\n"

@@ -288,7 +288,8 @@ def create_app(settings=None):
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 2}
+                "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 2,
+                "multi_item_version": 1}
 
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
@@ -462,7 +463,7 @@ def create_app(settings=None):
     def personal(request: Request, body: PersonalBody):
         current = mutation(request)
         data = data_for(current["user_id"])
-        allowed = {t["id"] for t in data["tasks"] + data["schedule"]} | {"opportunity:" + o["postId"] for o in data["opportunities"]}
+        allowed = {t["id"] for t in data["tasks"] + data["schedule"]} | {"opportunity:" + o.get("id", o["postId"]) for o in data["opportunities"]}
         if body.item_id not in allowed:
             raise HTTPException(404, "현재 계정에 연결된 항목이 아닙니다.")
         patch = body.model_dump(exclude_unset=True, exclude={"item_id"})

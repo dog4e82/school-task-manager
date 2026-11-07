@@ -18,6 +18,9 @@ TIERS = (
     r"^[ \t]*1[).]\s*(?:평가영역(?:\s*\([^\n)]*\))?|주제)\s*[:：].*$",
     r"^[ \t]*\[[^\]\n]*(?:수행평가|과제)[^\]\n]*\][ \t]*$",
 )
+NUMBERED = re.compile(r"^[ \t]*(?:\d{1,2}[.)]|[가-하][.)]|[-*•])\s+(.+)$", re.M)
+FIELD_HEADING = re.compile(r"^(?:조건|유의|참고|붙임|첨부|신청\s*방법|접수\s*방법|신청\s*기간|접수\s*기간|제출\s*기한|제출\s*방법|평가\s*방법|참가\s*대상|일시|장소|주최|목적|개요)\s*[:：]?")
+NAMED_WORK = re.compile(r"보고서|과제|코드|자료|발표|평가|대회|공모|경진|탐구|프로젝트|캠프|프로그램")
 SUBMISSION = re.compile(r"(?:제출\s*(?:마감(?:일|시간)?|기한|기일|기간|일시)|마감일|제출일|제출마감시간|발표\s*자료\s*제출|제출)\s*[:：]\s*")
 ACTIVITY = re.compile(r"(?:서술평가|수행평가|평가\s*일시|발표|일시|실시기간|변경\s*기간)\s*[:：]\s*")
 ONGOING = re.compile(r"수시(?:로)?[^\n.]*|틈날\s*때\s*마다|틈날때\s*마다|상시")
@@ -46,6 +49,20 @@ def blocks(text):
             title = re.sub(r"^\s*(?:1[).]\s*(?:평가영역(?:\([^)]*\))?|주제)\s*[:：]\s*)", "", anchor.group()).strip()
             result.append({"title": title[:200], "text": body})
         if len(result) >= 2:
+            return result
+    # General numbered notices need independent action/date sections. Merely
+    # numbering the formatting requirements of one assignment is not a split.
+    anchors = [m for m in NUMBERED.finditer(text)
+               if not FIELD_HEADING.search(m[1]) and NAMED_WORK.search(m[1])]
+    if len(anchors) >= 2:
+        result = []
+        for index, anchor in enumerate(anchors):
+            end = anchors[index + 1].start() if index + 1 < len(anchors) else len(text)
+            body = text[anchor.start():end].strip()
+            if not ACTION.search(body):
+                continue
+            result.append({'title': anchor[1].strip()[:200], 'text': body})
+        if sum(bool(DATE.search(block['text'])) for block in result) >= 2:
             return result
     return []
 

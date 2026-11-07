@@ -67,6 +67,27 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/data").status_code, 401)
         self.assertEqual(self.client.get("/app").headers["location"], "/")
 
+    def test_split_opportunities_save_independently_and_stay_account_scoped(self):
+        current = snapshot('a')
+        current['announcements'] = [{
+            'id': 'mixed', 'course_id': 'a', 'course_name': '시연 수업', 'source': 'announcement',
+            'title': '선택 활동 안내', 'text':
+            '1. 로봇 공모전 신청\n희망자는 신청하세요.\n접수기간: 2026.11.1.~2026.11.12.\n'
+            '2. 탐구 캠프 신청\n희망자는 신청하세요.\n접수기간: 2026.11.1.~2026.11.25.',
+            'raw': {'creationTime': '2026-11-01T00:00:00Z'}}]
+        self.store.save_snapshot(self.a, current)
+        headers = self.login(self.a)
+        rows = self.client.get('/api/data').json()['opportunities']
+        self.assertEqual(len(rows), 2)
+        first, second = ['opportunity:' + row['id'] for row in rows]
+        self.assertEqual(self.client.post('/api/personal', headers=headers,
+                         json={'item_id': first, 'saved': True}).status_code, 200)
+        self.assertTrue(self.store.personal(self.a)[first]['saved'])
+        self.assertNotIn(second, self.store.personal(self.a))
+        headers = self.login(self.b)
+        self.assertEqual(self.client.post('/api/personal', headers=headers,
+                         json={'item_id': first, 'saved': True}).status_code, 404)
+
     def test_public_pages_remain_informational_with_cookie_and_database_unavailable(self):
         self.login(self.a)
         with patch.object(self.store, 'session', side_effect=RuntimeError('database unavailable')), patch('webapp.build') as google, patch('webapp.Client') as ai:

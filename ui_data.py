@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sqlite3
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -52,12 +53,20 @@ def build_data(snapshot, cache, provider, today=None):
                       "created": raw.get("raw", {}).get("creationTime"), "attachments": attachments,
                       "analyzed": bool((cache.get(job["key"]) or {}).get("status") == "success")})
     tasks = []
+    task_keys = Counter((post_key(row['post']), row['item'].get('source_item_key') or
+                         (row['item'].get('title', '') + '\n' + (row['item'].get('task_evidence') or '')))
+                        for rows in groups.values() for row in rows)
     for group, rows in groups.items():
         for row in rows:
             item, raw = row["item"], row["post"]
             source_key = post_key(raw)
-            api_due = bool(row.get("api_due") or (not row["analyzed"] and raw.get("due_at")))
+            api_due = bool(row.get("api_due"))
             task_key = item.get("source_item_key") or (item.get("title", "") + "\n" + (item.get("task_evidence") or ""))
+            if task_keys[(source_key, task_key)] > 1:
+                # Keep existing IDs unless they previously collided. Separate
+                # actions must not share completion, personal notes or dates.
+                task_key += '\n' + json.dumps([item.get('deadline_kind'), item.get('task_evidence_source'),
+                                               item.get('action'), item.get('deadline_evidence')], ensure_ascii=False)
             tasks.append({"id": identifier(source_key + "\n" + task_key),
                           "postId": source_key, "courseId": raw["course_id"], "courseName": raw.get("course_name", ""),
                           "title": item.get("title", ""), "action": item.get("action") or item.get("title", ""),
