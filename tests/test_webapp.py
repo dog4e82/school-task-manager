@@ -66,6 +66,37 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/data").status_code, 401)
         self.assertEqual(self.client.get("/app").headers["location"], "/")
 
+    def test_public_pages_remain_informational_with_cookie_and_database_unavailable(self):
+        self.login(self.a)
+        with patch.object(self.store, 'session', side_effect=RuntimeError('database unavailable')), patch('webapp.build') as google, patch('webapp.Client') as ai:
+            for path in ('/', '/privacy'):
+                response=self.client.get(path)
+                self.assertEqual(response.status_code,200)
+                self.assertNotIn('location',response.headers)
+                self.assertNotIn('private-course',response.text)
+                self.assertEqual(self.client.head(path).status_code,200)
+            home=self.client.get('/').text
+            self.assertIn('<h1>모아</h1>',home)
+            self.assertIn('학생이 자신의 Google Classroom',home)
+            self.assertIn('href="'+self.settings.base_url+'/privacy"',home)
+            self.assertIn('개인정보처리방침',home)
+        google.assert_not_called()
+        ai.assert_not_called()
+
+    def test_privacy_identifies_service_processors_and_deletion_controls(self):
+        page=self.client.get('/privacy')
+        self.assertEqual(page.status_code,200)
+        for disclosure in ('모아 개인정보처리방침','Render','Neon','BAZE','보관 기간과 삭제','공통 분석 캐시','연결 해제·내 데이터 삭제','Google API Services User Data Policy'):
+            self.assertIn(disclosure,page.text)
+        for secret in ('private-access-a','private-refresh-a','private-client-secret','private-baze-key'):
+            self.assertNotIn(secret,page.text)
+
+    def test_robots_allows_public_information_and_marks_private_routes(self):
+        response=self.client.get('/robots.txt')
+        self.assertEqual(response.status_code,200)
+        self.assertIn('Allow: /privacy',response.text)
+        self.assertIn('Disallow: /api/',response.text)
+
     def test_each_account_only_receives_its_own_snapshot(self):
         self.login(self.a)
         first = self.client.get("/api/data")

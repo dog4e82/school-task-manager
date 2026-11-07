@@ -4,15 +4,20 @@ import html
 import json
 
 
-def page(title, content, bootstrap=None):
+SUPPORT_EMAIL = "dog4e82@gmail.com"
+
+
+def page(title, content, bootstrap=None, description=""):
     data = json.dumps(bootstrap or {}, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
-    return f'''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>{html.escape(title)} · 모아</title><link rel="stylesheet" href="/assets/account.css">
-    <body><header><a class="logo" href="/">▦ 모아.</a><a href="/privacy">개인정보 안내</a></header><main>{content}</main>
+    page_title = title if title == "모아" else title + " · 모아"
+    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="{html.escape(description, quote=True)}">
+    <title>{html.escape(page_title)}</title><link rel="stylesheet" href="/assets/account.css"></head>
+    <body><header><a class="logo" href="/" aria-label="모아 홈">▦ <span>모아</span></a><a href="/privacy">개인정보처리방침</a></header><main>{content}</main>
     <script type="application/json" id="account-data">{data}</script><script src="/assets/account.js" defer></script></body></html>'''
 
 
-def landing(configured, error=None):
+def landing(configured, error=None, public_origin=""):
     errors = {"google_denied": "Google 연결이 완료되지 않았어요. 계정과 읽기 권한을 확인하고 다시 연결하세요.",
               "oauth_failed": "로그인 연결을 확인하지 못했어요. 다시 시작해 주세요.",
               "oauth_token_failed": "Google 인증을 마무리하지 못했어요. 연결 오류 코드: LOGIN-TOKEN. 운영자가 서버의 Google 연결 설정과 통신 상태를 확인해야 합니다.",
@@ -23,10 +28,22 @@ def landing(configured, error=None):
               "state_expired": "로그인 시간이 지났거나 이 브라우저에서 시작한 연결이 아니에요. 다시 시작해 주세요."}
     notice = f'<p class="notice">{errors[error]}</p>' if error in errors else ""
     action = '<a class="primary" href="/auth/google">Google로 Classroom 연결 <span>↗</span></a>' if configured else '<p class="notice">웹 연결을 준비하고 있습니다. 운영자의 연결 설정이 끝나면 로그인할 수 있어요.</p>'
-    return page("나의 수업을 한곳에", f'''<section class="welcome"><div class="planner-symbol" aria-hidden="true">✓<span>▦</span></div>
-    <h1>해야 할 과제부터,<br>도전하고 싶은 활동까지.</h1><p>내 Google Classroom을 연결하고<br>과제와 신청 기한을 가까운 순서로 확인하세요.</p>{notice}{action}
-    <div class="feature-row"><span>▤ 과제 모아보기</span><span>♧ 대회·신청</span><span>▦ 가까운 마감</span></div>
-    <p class="small">연결한 계정의 자료만 표시합니다. 과제와 공지를 수정하거나 대신 제출하지 않습니다.</p></section>''')
+    privacy_url = html.escape(public_origin.rstrip("/") + "/privacy", quote=True)
+    return page("모아", f'''<section class="welcome public-welcome">
+    <h1>모아</h1><p class="welcome-title">해야 할 과제부터,<br>도전하고 싶은 활동까지.</p>
+    <p class="service-purpose">모아는 학생이 자신의 Google Classroom에 흩어진 과제·공지·수업 자료를 한곳에서 확인하는 학습 관리 웹서비스입니다.
+    제출 마감과 대회·활동 신청 기한을 가까운 순서로 정리하고, 원문으로 돌아가 내용을 확인할 수 있습니다.</p>
+    <div class="public-features">
+      <section><h2>▤ 과제 모아보기</h2><p>선택한 수업의 과제와 공지를 읽어 과목별 할 일과 제출 기한을 모읍니다.</p></section>
+      <section><h2>♧ 대회·신청</h2><p>선택해서 참여할 활동의 신청 기간과 학교 내부 신청 기한을 함께 확인합니다.</p></section>
+      <section><h2>▦ 본문과 첨부 확인</h2><p>게시물 본문을 펼쳐 보고 원문 링크로 교차 확인합니다. 추가로 허용하면 첨부 PDF도 읽어 기한 정리를 돕습니다.</p></section>
+    </div>
+    <section class="public-connection"><h2>내 수업 연결하기</h2>
+    <p>Google 계정으로 연결하고 모아 볼 수업을 직접 선택하세요. 수업 목록·과제·공지·자료 읽기 권한은 이 기능을 제공하기 위해 사용합니다.
+    연결한 계정이 접근할 수 있는 수업과 그 계정의 개인 기록만 표시합니다.</p>{notice}{action}<a class="dashboard-link" href="/app">내 대시보드</a>
+    <p class="small">Classroom 게시물을 수정하거나 대신 제출하지 않습니다. AI 정리는 별도 선택 기능이며 제안한 날짜는 원문에서 확인해 주세요.</p></section>
+    <footer class="public-footer"><a href="{privacy_url}">모아 개인정보처리방침</a><a href="mailto:{SUPPORT_EMAIL}">문의: {SUPPORT_EMAIL}</a></footer>
+    </section>''', description="모아는 Google Classroom 과제·공지·자료와 대회·활동 신청 기한을 한곳에 모아 확인하는 학생용 학습 관리 서비스입니다.")
 
 
 def setup(user, csrf, selected, has_drive, ai_enabled):
@@ -43,10 +60,46 @@ def setup(user, csrf, selected, has_drive, ai_enabled):
 
 
 def privacy():
-    return page("개인정보 안내", '''<article class="policy"><h1>내 수업 데이터는 어떻게 사용되나요?</h1>
-    <h2>연결하는 정보</h2><p>Google 계정 식별자·이름·이메일, 선택한 Classroom의 과제·공지·자료 본문과 등록 기한을 사용합니다. PDF 읽기를 추가로 허용하면 해당 게시물에 연결된 첨부 자료를 확인합니다.</p>
-    <h2>사용 목적과 접근</h2><p>기한 정리와 개인 학습 관리에만 사용합니다. Google 인증 토큰은 서버에 암호화해 보관하며 브라우저에 전달하지 않습니다. 각 사용자는 자신의 Google 계정으로 조회한 자료와 개인 기록에만 접근할 수 있습니다.</p>
-    <h2>선택하는 AI 정리</h2><p>사용자가 공지 AI 정리를 실행하면 선택된 안내의 제목·본문·이미 추출된 첨부 PDF 텍스트가 BAZE로 전송됩니다. 로그인이나 일반 목록 열기는 AI 생성 호출을 실행하지 않습니다. 동일한 게시물과 입력의 분석 결과는 다시 활용할 수 있으며, 타인의 수업 접근 권한을 얻는 데 사용하지 않습니다.</p>
-    <h2>기록과 삭제</h2><p>완료 표시·관심 활동·메모는 로그인한 계정별로 저장합니다. 대시보드의 연결 해제·내 데이터 삭제를 누르면 Google 연결을 취소하고 해당 계정의 인증정보·수집본·개인 기록을 삭제합니다. 공통 분석 캐시는 접근 가능한 동일 공지를 정리하는 데만 재사용됩니다. 원문이 없는 공개 예제로 제공하거나 광고·판매에 사용하지 않습니다.</p>
-    <h2>Google 데이터 사용</h2><p>Google API에서 받은 정보는 Google API Services User Data Policy의 제한적 사용 요건에 따라 사용하며, 일반 AI 모델의 학습을 위해 제공하지 않습니다. AI 제안과 날짜 추정은 원문과 교차 확인해야 합니다.</p>
-    <p><a href="/">시작 화면으로 돌아가기</a></p></article>''')
+    return page("모아 개인정보처리방침", f'''<article class="policy">
+    <h1>모아 개인정보처리방침</h1><p class="policy-date">시행일·최종 수정일: 2026년 11월 7일</p>
+    <p>모아는 Google Classroom의 과제·공지·자료와 선택 활동의 신청 기한을 모아 보는 학습 관리 서비스입니다.
+    이 방침은 모아 웹서비스에서 Google 계정을 연결할 때 접근하는 정보, 이용 목적, 외부 서비스 처리, 보관과 삭제 방법을 설명합니다.</p>
+    <h2>1. 운영 및 문의</h2><p>운영 주체는 모아 서비스 운영자입니다. 개인정보 열람·정정·삭제 및 서비스 문의는
+    <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>로 보내 주세요. 확인 과정에서는 필요한 최소한의 계정 확인 정보를 요청하며 Google 비밀번호나 인증 토큰을 요청하지 않습니다.</p>
+    <h2>2. 접근·수집하는 정보</h2><ul>
+    <li>Google 로그인: Google 계정 식별자, 이름, 이메일, 로그인 확인과 API 연결 유지에 필요한 OAuth 인증 토큰.</li>
+    <li>Classroom: 본인이 접근할 수 있는 수업 목록과 선택한 수업의 과제·공지·자료 게시물, 제목·본문·등록 기한·게시 시각·게시물 및 첨부 식별정보·원문 링크와 API가 제공하는 게시물 메타데이터. 게시물 본문에 다른 사람의 이름 등이 포함될 수 있습니다.</li>
+    <li>선택적 PDF 읽기: 사용자가 추가 권한을 허용하고 수집을 선택한 경우, 해당 수업 게시물에 첨부된 PDF 파일과 추출한 텍스트. Drive 읽기 권한은 넓은 범위의 접근을 허용하지만, 모아의 수집 기능은 선택한 게시물의 첨부 참조를 이용합니다.</li>
+    <li>개인 기록: 완료 표시, 관심 활동, 메모, 사용자가 입력한 기한, 수업 선택과 작업 진행 정보.</li>
+    <li>연결 유지와 운영: 로그인 세션, 임시 OAuth 연결 상태, 고정된 로그인 단계·결과별 횟수와 마지막 발생 시각. 진단 집계에는 계정 이름·이메일·인증 코드·토큰을 저장하지 않습니다.</li></ul>
+    <h2>3. 이용 목적과 선택 권한</h2><p>이 정보는 본인 확인, 수업 선택과 수집, 과제·활동 및 신청 기한 정리, 원문 확인, 개인 기록 저장, 연결 유지와 오류 확인에 사용합니다.
+    각 사용자는 자신의 Google 계정으로 접근할 수 있는 수업과 자신의 개인 기록을 확인합니다. Classroom 게시물을 변경하거나 과제를 대신 제출하는 데 사용하지 않습니다.
+    PDF 읽기와 AI 정리는 선택 기능입니다. Google에서 권한을 취소하면 해당 권한이 필요한 기능을 사용할 수 없습니다.</p>
+    <h2>4. 처리에 사용하는 외부 서비스</h2><ul>
+    <li>Google: 계정 인증과 사용자가 허용한 Classroom·Drive API 조회를 제공합니다.</li>
+    <li>Render: 웹서버를 실행하며 요청 처리에 필요한 계정·수업 정보와 선택적으로 다운로드한 첨부 파일을 처리합니다.</li>
+    <li>Neon: 계정 정보, 암호화된 Google 인증 토큰, 수집한 게시물, 개인 기록 및 분석 캐시를 비공개 데이터베이스에 저장합니다.</li>
+    <li>BAZE: 운영자가 AI 기능을 활성화하고 사용자가 AI 정리 실행에 동의한 경우, 분석 대상 게시물의 제목·본문·시각·기한·식별정보,
+    추출한 PDF 텍스트 및 관련 후속·이전 안내 문맥을 전달해 분석 응답을 받습니다. Google 인증 토큰과 개인 메모를 분석 입력으로 보내지 않습니다.</li></ul>
+    <p>외부 서비스는 위 기능을 처리하기 위해 사용하며, 각 공급자의 처리·보관에는 해당 서비스의 정책과 계약이 적용됩니다.
+    로그인, 홈페이지 열기와 일반 과제 목록 조회는 새로운 AI 생성 요청을 실행하지 않습니다.</p>
+    <h2>5. Google 데이터의 제한적 사용</h2><p>모아는 Google API에서 받은 정보를 위 사용자용 기능을 제공하는 데 사용합니다.
+    Google Workspace API에서 받은 정보는 일반화된 AI·머신러닝 모델의 개발·개선·학습에 사용하지 않습니다. AI 기능은 사용자가 선택한 자료를 요청 시점에 분석하는 용도로 사용합니다.
+    Google 사용자 데이터를 판매하거나 광고 타기팅, 데이터 중개, 신용 평가에 사용하지 않습니다.</p>
+    <p>Google API를 통해 받은 정보의 사용과 다른 앱으로의 전송에는 제한적 사용 요건을 포함한
+    <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>를 따릅니다.</p>
+    <h2>6. 보관 기간과 삭제</h2><p>계정 연결 정보, 수집본과 개인 기록은 연결된 계정의 기능을 제공하는 동안 보관합니다.
+    로그인 세션은 최대 7일, 로그인 진행을 위한 임시 연결 상태는 최대 10분 동안 유효합니다. 만료된 상태는 이후 정리 과정에서 제거합니다.</p>
+    <p>대시보드에서 <strong>연결 해제·내 데이터 삭제</strong>를 실행하면 Google 연결을 취소하고 운영 중인 데이터베이스에서 해당 계정의 인증정보·수집본·개인 기록·세션·작업 기록을 삭제하며 서버의 해당 계정 첨부 캐시도 제거합니다.
+    진행 중인 수집·분석 작업이 있으면 작업이 끝난 뒤 삭제할 수 있습니다. Google 계정의
+    <a href="https://myaccount.google.com/connections">서드 파티 연결 관리</a>에서도 권한을 취소할 수 있습니다. Google에서 권한을 취소하는 것과 모아에 저장된 기록을 삭제하는 것은 별도 절차입니다.</p>
+    <p>동일한 게시물을 중복 분석하지 않도록 저장한 공통 분석 캐시에는 과제·기한·조건, 근거로 인용한 공지 문구와 게시물 식별정보가 포함될 수 있습니다.
+    공통 캐시는 계정 삭제 후에도 남을 수 있으며, 해당 게시물에 접근할 수 있는 계정의 분석 재사용에만 사용합니다.
+    관련 캐시의 삭제도 원하면 위 문의 이메일로 게시물 원문 링크와 함께 요청해 주세요. 운영자가 요청 대상과 접근 권한을 확인해 처리합니다.
+    외부 공급자에게 이미 전달된 데이터의 보관·삭제에는 각 공급자의 정책과 계약도 적용됩니다.</p>
+    <h2>7. 정보 보호</h2><p>공개 웹 연결은 HTTPS를 사용하고 데이터베이스 연결은 TLS로 보호합니다. Google 인증 토큰은 서버의 고정 키로 암호화하여 저장하고 브라우저에 전달하지 않습니다.
+    개인 기록과 수집본은 서버에서 계정별 접근 권한을 확인합니다. 로그인에는 임시 연결 상태와 브라우저 연결 확인을 사용하고, 개인 기록 변경에는 요청 위조 방지 검사를 적용합니다.
+    인증 코드·토큰·비밀 키를 애플리케이션 로그에 출력하지 않도록 처리합니다.</p>
+    <h2>8. 쿠키 및 방침 변경</h2><p>로그인 유지와 Google 연결 확인을 위한 필수 쿠키를 사용합니다. 공개 웹서비스에는 광고용 추적 또는 방문 분석 스크립트를 포함하지 않습니다.
+    처리 방식이 바뀌면 이 페이지의 내용과 최종 수정일을 갱신합니다. 문의 및 권리 행사 요청은 <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>로 보내 주세요.</p>
+    <p><a href="/">모아 홈페이지로 돌아가기</a></p></article>''', description="모아의 Google 계정·Classroom·첨부 PDF 정보 이용, 외부 서비스 처리, 보관 기간과 삭제 방법을 안내합니다.")

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import httplib2
 import requests
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2 import id_token
@@ -262,20 +262,24 @@ def create_app(settings=None):
             executor.submit(run_ai, user_id, job_id, body.limit)
         return {"job_id": job_id}
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def home(request: Request, error: str | None = None):
-        if store.session(request.cookies.get(settings.cookie, "")) and not error:
-            return RedirectResponse("/app", status_code=303)
-        return HTMLResponse(landing(settings.configured, error))
+        # The informational homepage is public even with a session cookie and
+        # remains independent of database availability. /app is the dashboard.
+        return HTMLResponse(landing(settings.configured, error, settings.base_url))
 
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 4}
+                "oauth_flow_version": 4, "public_pages_version": 1}
 
-    @app.get("/privacy", response_class=HTMLResponse)
+    @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
         return HTMLResponse(privacy())
+
+    @app.get("/robots.txt", response_class=PlainTextResponse)
+    def robots():
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nDisallow: /auth/\nDisallow: /api/\nDisallow: /app\nDisallow: /setup\n")
 
     @app.get("/assets/{name}")
     def asset(name: str):

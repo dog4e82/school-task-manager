@@ -23,9 +23,9 @@ def main():
     opener = build_opener(NoRedirect())
     checks = []
 
-    def get(path):
+    def get(path, method="GET"):
         try:
-            response = opener.open(Request(origin + path, headers={"User-Agent": "Moa-Deployment-Check/1"}), timeout=20)
+            response = opener.open(Request(origin + path, method=method, headers={"User-Agent": "Moa-Deployment-Check/1"}), timeout=20)
         except HTTPError as error:
             response = error
         except (URLError, OSError):
@@ -38,6 +38,9 @@ def main():
 
     status, headers, body = get("/")
     check("public_home", status == 200 and 'href="/auth/google"' in body and 'id="app-data"' not in body)
+    check("homepage_brand_and_purpose", '<h1>모아</h1>' in body and '학생이 자신의 Google Classroom' in body)
+    check("homepage_privacy_link", 'href="'+origin+'/privacy"' in body)
+    check("homepage_head_accessible", get('/', method='HEAD')[0] == 200)
     check("private_cache_policy", "no-store" in headers.get("Cache-Control", ""))
     check("frame_protection", headers.get("X-Frame-Options") == "DENY")
     status, _, body = get("/health")
@@ -46,8 +49,12 @@ def main():
     except ValueError:
         health = {}
     check("health_and_oauth_configured", status == 200 and health.get("status") == "ok" and health.get("google_login_configured") is True)
-    status, _, _ = get("/privacy")
+    status, _, body = get("/privacy")
     check("privacy_page", status == 200)
+    check("privacy_disclosures", all(value in body for value in ('모아 개인정보처리방침','Render','Neon','BAZE','보관 기간과 삭제','Google API Services User Data Policy')))
+    check("privacy_head_accessible", get('/privacy', method='HEAD')[0] == 200)
+    status, _, body = get('/robots.txt')
+    check("public_information_crawlable_while_awake", status == 200 and 'Allow: /privacy' in body)
     for path in ("/api/data", "/api/courses", "/api/session", "/api/jobs/latest"):
         status, _, _ = get(path)
         check("anonymous_blocked:" + path, status == 401)
