@@ -43,6 +43,9 @@ class Store:
                 reserved INTEGER NOT NULL, day TEXT NOT NULL, result TEXT, created BIGINT NOT NULL);
               CREATE UNIQUE INDEX IF NOT EXISTS one_active_job_per_user ON jobs(user_id)
                 WHERE status IN ('queued','running');
+              CREATE TABLE IF NOT EXISTS login_diagnostics (
+                stage TEXT NOT NULL, result TEXT NOT NULL, attempts INTEGER NOT NULL,
+                last_seen BIGINT NOT NULL, PRIMARY KEY(stage,result));
             """)
 
     @contextmanager
@@ -62,6 +65,18 @@ class Store:
 
     def encrypt(self, value):
         return self.cipher.encrypt(json.dumps(value).encode())
+
+    def record_login(self, stage, result):
+        """Bounded aggregate operational counters, with no account identifiers."""
+        if stage not in {'start', 'callback', 'token', 'identity', 'permissions', 'storage', 'session'}:
+            raise ValueError('invalid_login_stage')
+        if result not in {'started', 'received', 'success', 'state_expired', 'denied', 'missing_scopes',
+                          'invalid_client', 'invalid_grant', 'scope_changed', 'network', 'failed'}:
+            raise ValueError('invalid_login_result')
+        with self.db() as db:
+            db.execute('INSERT INTO login_diagnostics VALUES (?,?,1,?) '
+                       'ON CONFLICT(stage,result) DO UPDATE SET attempts=login_diagnostics.attempts+1,last_seen=excluded.last_seen',
+                       (stage, result, time.time_ns() // 1000))
 
     def decrypt(self, value):
         return json.loads(self.cipher.decrypt(value))

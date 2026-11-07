@@ -25,6 +25,7 @@ from google_auth_httplib2 import AuthorizedHttp
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from pydantic import BaseModel, Field, ConfigDict
+from oauthlib.oauth2 import InvalidClientError, InvalidGrantError
 
 from classroom import READ_SCOPES, SYNC_SCOPES, list_courses
 from classroom_data import collect_snapshot, SEOUL
@@ -100,6 +101,13 @@ def create_app(settings=None):
         return SavedAnalyses(cache_path) if readonly else Cache(cache_path)
     analysis_cache().close()
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="moa-job")
+
+    def login_event(stage, result):
+        try:
+            store.record_login(stage, result)
+        except Exception:
+            # Diagnostics must never change whether a login succeeds or fails.
+            LOGGER.warning('oauth_diagnostics_unavailable')
 
     @asynccontextmanager
     async def lifespan(app):
@@ -258,7 +266,7 @@ def create_app(settings=None):
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 2}
+                "oauth_flow_version": 3}
 
     @app.get("/privacy", response_class=HTMLResponse)
     def privacy_page():
@@ -278,6 +286,7 @@ def create_app(settings=None):
         verifier, nonce = secrets.token_urlsafe(64), secrets.token_urlsafe(32)
         scopes = WEB_SCOPES + (SYNC_SCOPES if pdf else READ_SCOPES)
         state, binding = store.begin_oauth({"verifier": verifier, "nonce": nonce, "scopes": scopes})
+        login_event('start', 'started')
         flow = Flow.from_client_config(settings.google_config(), scopes=scopes, state=state, code_verifier=verifier)
         flow.redirect_uri = settings.callback
         url, _ = flow.authorization_url(access_type="offline", prompt="select_account consent", nonce=nonce)
@@ -287,10 +296,13 @@ def create_app(settings=None):
 
     @app.get("/auth/callback")
     def callback(request: Request, state: str = "", code: str = "", error: str = ""):
+        login_event('callback', 'received')
         pending = store.consume_oauth(state, request.cookies.get("moa_oauth", "")) if state else None
         if not pending:
+            login_event('callback', 'state_expired')
             response = RedirectResponse("/?error=state_expired", status_code=303)
         elif error or not code:
+            login_event('callback', 'denied')
             response = RedirectResponse("/?error=google_denied", status_code=303)
         else:
             stage = "token"
@@ -319,9 +331,17 @@ def create_app(settings=None):
                 token = store.create_session(user_id)
                 response = RedirectResponse("/setup", status_code=303)
                 response.set_cookie(settings.cookie, token, max_age=604800, httponly=True, secure=settings.secure, samesite="lax", path="/")
+                login_event('session', 'success')
             except Exception as exc:
                 if isinstance(exc, MissingLoginScopes):
                     stage = "permissions"
+                reason = ('missing_scopes' if isinstance(exc, MissingLoginScopes)
+                          else 'invalid_client' if isinstance(exc, InvalidClientError)
+                          else 'invalid_grant' if isinstance(exc, InvalidGrantError)
+                          else 'scope_changed' if isinstance(exc, Warning)
+                          else 'network' if isinstance(exc, requests.RequestException)
+                          else 'failed')
+                login_event(stage, reason)
                 # Exception messages can contain tokens or callback URLs. Log only
                 # our fixed stage and the exception class, never the exception.
                 LOGGER.warning("oauth_callback_failed:%s:%s", stage, type(exc).__name__)

@@ -234,6 +234,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("LOGIN-TOKEN",page)
         self.assertNotIn("private-",page+str(logs.output)+response.text)
         self.assertIn("oauth_callback_failed:token:ValueError",str(logs.output))
+        with self.store.db() as db:
+            events = [dict(row) for row in db.execute('SELECT stage,result,attempts FROM login_diagnostics').fetchall()]
+        self.assertIn({'stage':'token','result':'failed','attempts':1},events)
+        self.assertNotIn('private-',json.dumps(events))
         self.assertIsNone(self.client.cookies.get(self.settings.cookie))
         self.assertIsNone(self.store.consume_oauth(state,binding))
 
@@ -258,6 +262,25 @@ class WebTests(unittest.TestCase):
         saved=self.store.get_user(session["user_id"])["credentials"]
         self.assertIn("https://www.googleapis.com/auth/drive.readonly",saved["scopes"])
         self.assertNotIn("private-access-new",response.text)
+        with self.store.db() as db:
+            success = db.execute("SELECT attempts FROM login_diagnostics WHERE stage='session' AND result='success'").fetchone()
+        self.assertEqual(success[0],1)
+
+    def test_login_diagnostics_are_bounded_and_do_not_block_login(self):
+        with self.assertRaises(ValueError):
+            self.store.record_login('private-token','failed')
+        with self.assertRaises(ValueError):
+            self.store.record_login('token','private-token')
+        self.store.record_login('token','invalid_client')
+        self.store.record_login('token','invalid_client')
+        with self.store.db() as db:
+            count = db.execute("SELECT attempts FROM login_diagnostics WHERE stage='token' AND result='invalid_client'").fetchone()[0]
+        self.assertEqual(count,2)
+        with patch.object(self.store,'record_login',side_effect=RuntimeError('private-secret')):
+            with self.assertLogs('moa',level='WARNING') as logs:
+                start=self.client.get('/auth/google')
+        self.assertEqual(start.status_code,303)
+        self.assertNotIn('private-secret',str(logs.output))
 
     def test_real_token_parser_missing_scope_never_creates_account_session(self):
         start=self.client.get("/auth/google")

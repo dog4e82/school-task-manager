@@ -104,7 +104,7 @@ uv run webapp.py check
 
 ## 6. 로그인 실패 구분
 
-`/health`의 `oauth_flow_version: 2`로 새 로그인 처리의 배포 여부를 확인한다. Google에서 돌아온 뒤 실패하면 시작 화면에 다음 코드가 나온다.
+`/health`의 `oauth_flow_version: 3`으로 새 로그인 처리의 배포 여부를 확인한다. Google에서 돌아온 뒤 실패하면 시작 화면에 다음 코드가 나온다.
 
 | 코드 | 확인할 단계 |
 | --- | --- |
@@ -115,3 +115,5 @@ uv run webapp.py check
 | `LOGIN-SESSION` | 계정 저장 이후 세션 발급 |
 
 로그에는 `oauth_callback_failed:단계:예외클래스`만 기록한다. 원래 예외 메시지·토큰 응답·인증 URL은 기록하지 않는다. 과거 PDF 연결 등으로 실제 허용 권한이 요청 목록보다 많아도 필수 권한을 모두 포함하면 허용한다. 실제로 빠진 권한은 거부하며, 전역 `OAUTHLIB_RELAX_TOKEN_SCOPE`를 켜지 않는다.
+
+비공개 DB의 `login_diagnostics`에는 고정된 단계·결과 코드별 누적 횟수와 마지막 발생 시각만 보관한다. 계정 정보·인증 코드·토큰·URL·예외 메시지는 저장하지 않으며 공개 조회 API도 없다. 이 집계가 실패해도 로그인 처리는 계속한다.
