@@ -6,6 +6,8 @@ services:
     branch: moa-classroom-web
     runtime: python
     plan: free
+    domains:
+      - app.moa-classroom.dynv6.net
     buildCommand: uv sync --frozen --no-dev --no-install-project
     startCommand: uv run --no-sync webapp.py serve --host 0.0.0.0
     healthCheckPath: /health
@@ -35,6 +37,8 @@ services:
     repo: https://github.com/dog4e82/school-task-manager
     branch: moa-classroom-web
     runtime: static
+    domains:
+      - info.moa-classroom.dynv6.net
     buildCommand: "true"
     staticPublishPath: ./public-site
     routes:

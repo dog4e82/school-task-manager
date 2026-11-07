@@ -67,6 +67,30 @@ Render에서 기존 Blueprint `schclas`를 동기화하면 `moa-info` Static Sit
 
 소유권 확인이 완료된 뒤에는 Google이 안내한 대로 24시간 반영을 기다리고, 다른 지적 사항도 해결한 뒤 브랜딩을 재검증한다.
 
+## 생성한 무료 DNS 주소 연결
+
+사용자가 생성했다고 알려준 Zone은 `moa-classroom.dynv6.net`이다. 소개 주소는 `info.moa-classroom.dynv6.net`, 앱 주소는 `app.moa-classroom.dynv6.net`으로 계획했다.
+
+| 위치 | 이름 | 유형 | 값 |
+| --- | --- | --- | --- |
+| dynv6 Records | `info` | CNAME | `moa-info.onrender.com.` |
+| dynv6 Records | `app` | CNAME | `moa-classroom.onrender.com.` |
+| Render moa-info | 커스텀 도메인 | HTTPS | `info.moa-classroom.dynv6.net` |
+| Render moa-classroom | 커스텀 도메인 | HTTPS | `app.moa-classroom.dynv6.net` |
+
+Render Blueprint의 두 서비스에 위 커스텀 도메인 하나씩을 등록했다. 실제 DNS·TLS 검증과 APP_BASE_URL 전환은 아직 확인 전이며 기존 로그인 주소를 유지한다. 기존에 사용 중인 커스텀 도메인이 없는 Hobby 워크스페이스에서는 이 두 개가 기본 포함 한도에 해당한다. 별도 루트·www 도메인은 추가하지 않는다.
+
+새 웹 OAuth 리디렉션 URI는 `https://app.moa-classroom.dynv6.net/auth/callback`이다. DNS·TLS 연결 후 기존 웹 클라이언트에 먼저 추가하고, 그다음 Render의 APP_BASE_URL을 `https://app.moa-classroom.dynv6.net`으로 설정한다. Client ID·Secret·고정 암호화 키는 변경하지 않는다.
+
+실제 연결을 확인한 후 정적 페이지를 다음 명령으로 다시 생성한다.
+
+```powershell
+uv run python scripts/export-public-site.py --app-origin https://app.moa-classroom.dynv6.net --public-origin https://info.moa-classroom.dynv6.net
+uv run python scripts/export-public-site.py --check --app-origin https://app.moa-classroom.dynv6.net --public-origin https://info.moa-classroom.dynv6.net
+```
+
+Google Search Console에서는 프로젝트 소유자 계정으로 `moa-classroom.dynv6.net`의 Domain 속성을 추가하고 발급받은 TXT 값을 해당 Zone 루트에 등록한다. 소유권 검증을 마친 뒤 홈페이지·정책·콜백에 쓰이는 도메인 전체를 새 주소와 대조하고 브랜딩 검증을 진행한다.
+
 ## 공식 문서
 
 - [앱 대상과 게시 상태 관리](https://support.google.com/cloud/answer/15549945)

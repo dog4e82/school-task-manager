@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -122,7 +123,13 @@ def create_app(settings=None):
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store, app.state.settings, app.state.executor = store, settings, executor
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list({urlsplit(settings.base_url).hostname, "localhost", "127.0.0.1"}))
+    allowed_hosts = {urlsplit(settings.base_url).hostname, "localhost", "127.0.0.1"}
+    render_host = urlsplit(os.environ.get('RENDER_EXTERNAL_URL', '')).hostname
+    if render_host and re.fullmatch(r'[a-z0-9][a-z0-9-]*\.onrender\.com', render_host):
+        # Render's health checks and old bookmarks can retain this exact host
+        # after a custom domain is enabled. Do not trust a wildcard domain.
+        allowed_hosts.add(render_host)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
 
     @app.middleware("http")
     async def response_policy(request, call_next):
@@ -271,7 +278,7 @@ def create_app(settings=None):
     @app.get("/health")
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
-                "oauth_flow_version": 4, "public_pages_version": 1}
+                "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 1}
 
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
@@ -289,7 +296,11 @@ def create_app(settings=None):
         return FileResponse(ROOT / "web" / name, media_type=allowed[name])
 
     @app.get("/auth/google")
-    def login(pdf: bool = False):
+    def login(request: Request, pdf: bool = False):
+        if request.url.hostname != urlsplit(settings.base_url).hostname:
+            # The binding cookie must be set on the same host as the callback.
+            # Redirect before creating any OAuth state; never forward a code.
+            return RedirectResponse(settings.base_url + '/auth/google' + ('?pdf=1' if pdf else ''), status_code=303)
         if not settings.configured:
             return RedirectResponse("/?error=oauth_failed", status_code=303)
         verifier, nonce = secrets.token_urlsafe(64), secrets.token_urlsafe(32)

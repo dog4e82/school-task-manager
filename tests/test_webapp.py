@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import time
 import unittest
@@ -96,6 +97,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code,200)
         self.assertIn('Allow: /privacy',response.text)
         self.assertIn('Disallow: /api/',response.text)
+
+    def test_custom_domain_login_sets_binding_only_on_callback_host(self):
+        domain_settings=Settings('https://app.moa.example.invalid',Path(self.temp.name)/'domain',self.settings.token_key,
+                                 self.settings.client_id,self.settings.client_secret)
+        with patch.dict(os.environ,{'RENDER_EXTERNAL_URL':'https://synthetic-moa.onrender.com'}):
+            domain_app=create_app(domain_settings)
+        with TestClient(domain_app,base_url='https://synthetic-moa.onrender.com',follow_redirects=False) as client:
+            with patch('webapp.Flow.from_client_config') as flow:
+                start=client.get('/auth/google?pdf=1&code=private-ignored-code')
+                flow.assert_not_called()
+            self.assertEqual(start.headers['location'],'https://app.moa.example.invalid/auth/google?pdf=1')
+            self.assertNotIn('set-cookie',start.headers)
+            with domain_app.state.store.db() as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM oauth_states').fetchone()[0],0)
+            canonical=client.get(start.headers['location'])
+            query=parse_qs(urlsplit(canonical.headers['location']).query)
+            self.assertEqual(query['redirect_uri'],[domain_settings.callback])
+            self.assertIn('https://www.googleapis.com/auth/drive.readonly',query['scope'][0].split())
+            binding=[cookie for cookie in client.cookies.jar if cookie.name=='moa_oauth']
+            self.assertEqual(len(binding),1)
+            self.assertEqual(binding[0].domain,'app.moa.example.invalid')
+            self.assertTrue(binding[0].secure)
+            self.assertEqual(client.get('/health').status_code,200)
+            self.assertEqual(client.get('https://untrusted.example.invalid/auth/google').status_code,400)
 
     def test_each_account_only_receives_its_own_snapshot(self):
         self.login(self.a)
