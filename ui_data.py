@@ -12,6 +12,7 @@ from notice_ai import DEFAULT_MODEL, post_key, prepare
 from task_report import gather
 from opportunities import collect as collect_opportunities, confirmed_date
 from deadline_schedule import combine
+from analysis_selection import expired_for_analysis
 
 
 class SavedAnalyses:
@@ -45,10 +46,15 @@ def build_data(snapshot, cache, provider, today=None):
         key = post_key(raw)
         attachments = []
         for source in raw.get("attachments", []):
-            attachments.append({field: source.get(field) for field in
-                                ("file_id", "title", "url", "status", "pages", "total_pages", "unread_pages")})
+            attachment = {field: source.get(field) for field in
+                          ("file_id", "title", "url", "status", "total_pages", "unread_pages", "cached_copy")}
+            # The interface links to the original PDF. Its full extracted text
+            # remains in the private snapshot for AI, not in every HTML load.
+            attachment['pages'] = [{'page': page['page']} for page in source.get('pages', [])]
+            attachments.append(attachment)
         changes = [entry for entry in snapshot.get('change_history', []) if entry.get('post_id') == key]
         posts.append({"id": key, "title": raw.get("title") or raw.get("text", "").split("\n", 1)[0][:100] or "제목 없는 게시물",
+                      "expiredForAnalysis": expired_for_analysis(raw,today),
                       "courseId": raw["course_id"], "courseName": raw.get("course_name", ""), "source": raw["source"],
                       "text": raw.get("text", ""), "url": raw.get("original_url"), "due": raw.get("due_at"),
                       "created": raw.get("raw", {}).get("creationTime"), "attachments": attachments, "changes": changes,
@@ -91,7 +97,12 @@ def build_data(snapshot, cache, provider, today=None):
             "courses": [{"id": c["id"], "name": c.get("name", "이름 없는 수업")} for c in snapshot.get("courses", [])],
             "tasks": tasks, "posts": posts, "opportunities": opportunities, "schedule": combine(tasks, opportunities),
             "stats": {"analyzed": analyzed, "totalPosts": len(jobs), "totalCourses": len(snapshot.get("courses", [])),
-                      "pdf": snapshot.get("attachment_summary", {}), "collectionComplete": snapshot.get("complete", True)}}
+                      "analysisEligible": sum(not post['expiredForAnalysis'] for post in posts),
+                      "eligibleAnalyzed": sum(post['analyzed'] and not post['expiredForAnalysis'] for post in posts),
+                      "analysisExpired": sum(post['expiredForAnalysis'] for post in posts),
+                      "pdf": snapshot.get("attachment_summary", {}), "collectionComplete": snapshot.get("complete", True),
+                      "collectionFailures": [{'courseId': failure.get('course_id'), 'resource': failure.get('resource')}
+                                             for failure in snapshot.get('failures', [])]}}
 
 
 def load_data(snapshot_path, database_path, provider, today=None):

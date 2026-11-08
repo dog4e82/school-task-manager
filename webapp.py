@@ -221,6 +221,9 @@ def create_app(settings=None):
     def run_sync(user_id, job_id, selected, include_pdf, analyze_after_sync=False):
         creds = None
         try:
+            previous = store.snapshot(user_id) or {}
+            saved_posts = {post_key(p): p for key in ('assignments', 'announcements', 'materials')
+                           for p in previous.get(key, [])}
             store.finish_job(user_id, job_id, "running", "계정의 수업 접근 권한 확인 중")
             creds = get_credentials(user_id)
             service = google_service("classroom", creds)
@@ -234,7 +237,22 @@ def create_app(settings=None):
                 service.close()
             for post in snapshot["assignments"] + snapshot["announcements"] + snapshot["materials"]:
                 post["attachments"] = references(post)
+                # Keep previously read pages only for the same still-attached file.
+                saved = {a.get('file_id'): a for a in saved_posts.get(post_key(post), {}).get('attachments', [])
+                         if a.get('file_id') and a.get('pages')}
+                for index, attachment in enumerate(post['attachments']):
+                    if not include_pdf and attachment.get('file_id') in saved:
+                        post['attachments'][index] = {**saved[attachment['file_id']], **attachment,
+                                                     'pages': saved[attachment['file_id']]['pages'],
+                                                     'status': saved[attachment['file_id']].get('status'),
+                                                     'cached_copy': True}
             snapshot['auto_analysis_consent'] = analyze_after_sync
+            counts = {}
+            for post in snapshot['assignments'] + snapshot['announcements'] + snapshot['materials']:
+                for attachment in post['attachments']:
+                    status = attachment.get('status', 'not_read')
+                    counts[status] = counts.get(status, 0) + 1
+            snapshot['attachment_summary'] = counts
             store.save_snapshot(user_id, snapshot)
             store.finish_job(user_id, job_id, 'running', '본문 연결 완료 · 첨부와 AI 정리는 계속 진행합니다.',
                              {'snapshot_ready': True})
@@ -274,7 +292,7 @@ def create_app(settings=None):
                 store.finish_job(user_id, job_id, 'running',
                                  f"새 공지 AI 정리 중 · 신규 호출 {value['calls']}회 · 기존 결과 {value['cached']}개 재사용")
             report = run_analysis(Client(settings.baze_base, settings.baze_key), cache, jobs, DEFAULT_MODEL,
-                                  limit=limit, progress=progress, minimum_credits=settings.minimum_credits)
+                                  limit=limit, progress=progress, minimum_credits=settings.minimum_credits, exclude_expired=True)
             if report.get('stopped'):
                 stage = ('남은 크레딧이 2,000 미만이라 새 분석을 멈췄어요. 저장된 결과는 계속 볼 수 있어요.'
                          if report['stopped'] == 'low_credits' else '잔액을 확인하지 못해 새 분석을 멈췄어요. 저장된 결과를 확인하세요.')
@@ -317,7 +335,7 @@ def create_app(settings=None):
         return {"status": "ok", "google_login_configured": settings.configured,
                 "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 2,
                 "multi_item_version": 1, "snapshot_history_version": 1,
-                "analysis_policy_version": 1,
+                "analysis_policy_version": 2, "drive_auto_read_enabled": False,
                 "ai_generation_enabled": settings.ai_enabled and bool(settings.baze_base and settings.baze_key)}
 
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
@@ -337,6 +355,8 @@ def create_app(settings=None):
 
     @app.get("/auth/google")
     def login(request: Request, pdf: bool = False):
+        # Legacy PDF links must not reintroduce a restricted public OAuth scope.
+        pdf = False
         # The binding cookie must be set on the same host as the callback.
         # Redirect before creating any OAuth state; never forward a code.
         canonical = canonical_page(request, '/auth/google' + ('?pdf=1' if pdf else ''))
@@ -345,12 +365,13 @@ def create_app(settings=None):
         if not settings.configured:
             return RedirectResponse("/?error=oauth_failed", status_code=303)
         verifier, nonce = secrets.token_urlsafe(64), secrets.token_urlsafe(32)
-        scopes = WEB_SCOPES + (SYNC_SCOPES if pdf else READ_SCOPES)
+        scopes = WEB_SCOPES + READ_SCOPES
         state, binding = store.begin_oauth({"verifier": verifier, "nonce": nonce, "scopes": scopes})
         login_event('start', 'started')
         flow = Flow.from_client_config(settings.google_config(), scopes=scopes, state=state, code_verifier=verifier)
         flow.redirect_uri = settings.callback
-        url, _ = flow.authorization_url(access_type="offline", prompt="select_account consent", nonce=nonce)
+        url, _ = flow.authorization_url(access_type="offline", prompt="select_account consent", nonce=nonce,
+                                        include_granted_scopes='false')
         response = RedirectResponse(url, status_code=303)
         response.set_cookie("moa_oauth", binding, max_age=600, httponly=True, secure=settings.secure, samesite="lax", path="/auth")
         return response
@@ -422,7 +443,7 @@ def create_app(settings=None):
         user = store.get_user(current["user_id"])
         prior = store.snapshot(user["id"])
         creds = Credentials.from_authorized_user_info(user["credentials"])
-        return HTMLResponse(setup(user, current["csrf"], [c["id"] for c in prior["courses"]] if prior else [], creds.has_scopes(SYNC_SCOPES),
+        return HTMLResponse(setup(user, current["csrf"], [c["id"] for c in prior["courses"]] if prior else [], False,
                                   settings.ai_enabled and bool(settings.baze_base and settings.baze_key) and school_allowed(user)))
 
     @app.get("/app", response_class=HTMLResponse)
@@ -439,7 +460,7 @@ def create_app(settings=None):
         data = data_for(current["user_id"])
         user = store.get_user(current["user_id"])
         data["web"] = {"userId": user["id"], "name": user["name"], "csrf": current["csrf"],
-                       "hasDrive": Credentials.from_authorized_user_info(user["credentials"]).has_scopes(SYNC_SCOPES),
+                       "hasDrive": False,
                        "personal": store.personal(user["id"]),
                        "autoAnalyze": data.get('autoAnalyze', False),
                        "aiEnabled": settings.ai_enabled and bool(settings.baze_base and settings.baze_key) and school_allowed(user)}
@@ -468,8 +489,8 @@ def create_app(settings=None):
             require_ai(current['user_id'])
         if any(not value or len(value) > 100 for value in body.course_ids):
             raise HTTPException(422, "수업 선택이 올바르지 않습니다.")
-        if body.include_pdf and not get_credentials(current["user_id"]).has_scopes(SYNC_SCOPES):
-            raise HTTPException(403, "첨부 PDF 읽기 권한을 먼저 연결해 주세요.")
+        if body.include_pdf:
+            raise HTTPException(403, "PDF 자동 읽기는 현재 제외했어요. 새로고침 후 본문 연결로 진행해 주세요.")
         return enqueue(current["user_id"], "sync", body)
 
     @app.post("/api/analyze", status_code=202)
@@ -484,7 +505,7 @@ def create_app(settings=None):
         cache = analysis_cache(readonly=True)
         try:
             plan = run_analysis(None, cache, prepare(snapshot, DEFAULT_MODEL, settings.baze_base),
-                                DEFAULT_MODEL, dry_run=True)
+                                DEFAULT_MODEL, dry_run=True, exclude_expired=True)
         finally:
             cache.close()
         if not plan['pending']:

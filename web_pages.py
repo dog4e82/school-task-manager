@@ -36,7 +36,7 @@ def landing(configured, error=None, public_origin=""):
     <div class="public-features">
       <section><h2>▤ 과제 모아보기</h2><p>선택한 수업의 과제와 공지를 읽어 과목별 할 일과 제출 기한을 모읍니다.</p></section>
       <section><h2>♧ 대회·신청</h2><p>선택해서 참여할 활동의 신청 기간과 학교 내부 신청 기한을 함께 확인합니다.</p></section>
-      <section><h2>▦ 본문과 첨부 확인</h2><p>게시물 본문을 펼쳐 보고 원문 링크로 교차 확인합니다. 추가로 허용하면 첨부 PDF도 읽어 기한 정리를 돕습니다.</p></section>
+      <section><h2>▦ 본문과 첨부 확인</h2><p>게시물 본문을 펼쳐 보고 원문 링크로 교차 확인합니다. 새 첨부 파일의 내용은 Classroom 원문에서 확인해 주세요.</p></section>
     </div>
     <section class="public-connection"><h2>내 수업 연결하기</h2>
     <p>Google 계정으로 연결하고 모아 볼 수업을 직접 선택하세요. 수업 목록·과제·공지·자료 읽기 권한은 이 기능을 제공하기 위해 사용합니다.
@@ -47,14 +47,13 @@ def landing(configured, error=None, public_origin=""):
 
 
 def setup(user, csrf, selected, has_drive, ai_enabled):
-    pdf_action = ('<label class="pdf-choice"><input id="include-pdf" type="checkbox" checked> 첨부 PDF 함께 읽기</label>'
-                  if has_drive else '<a class="pdf-connect" href="/auth/google?pdf=1">PDF 읽기 연결 <span aria-hidden="true">↗</span></a>')
+    has_drive = False
     ai_option = ('<label class="ai-choice"><input id="auto-analyze" type="checkbox" checked>'
                  '<span>연결 후 새 공지 AI 정리<small>본문과 추출된 PDF 텍스트를 BAZE로 보내는 데 동의합니다. 같은 자료의 저장된 결과는 재사용합니다.</small></span></label>'
-                 if ai_enabled else '<p class="small">본문과 PDF부터 연결합니다. AI 정리는 준비되는 대로 사용할 수 있어요.</p>')
+                 if ai_enabled else '<p class="small">Classroom 본문부터 연결합니다. AI 정리는 준비되는 대로 사용할 수 있어요.</p>')
     return page("수업 연결", f'''<section class="setup"><span class="kicker">나의 학습 공간</span><h1>모아 볼 수업을 골라 주세요.</h1>
     <p>{html.escape(user['name'])}님의 계정에서 접근할 수 있는 수업을 불러옵니다.</p>
-    <section class="pdf-first" aria-labelledby="pdf-first-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6ZM14 3v6h6M8 13h8M8 17h5"/></svg><div><h2 id="pdf-first-title">PDF까지 읽고 시작하기 <span>권장</span></h2><p>모집 요강·안내문 속 제출 조건과 신청 기한도 함께 확인해요.</p>{pdf_action}<small>PDF가 많으면 시간이 더 걸릴 수 있어요. 스캔 PDF나 지원하지 않는 파일은 원문 확인이 필요해요.</small></div></section>
+    <p class="small">Drive 추가 권한 없이 Classroom 본문부터 연결합니다. PDF 자동 읽기는 현재 제외했으며, 이미 저장된 PDF와 분석 결과는 유지합니다. 새 첨부의 내용은 원문에서 확인해 주세요.</p>
     <div id="account-message" class="notice" role="status" hidden></div><div class="choose-toolbar"><button id="select-all">전체 선택</button><button id="select-none">선택 해제</button></div>
     <div id="course-options" class="course-options"><p>수업을 불러오는 중…</p></div>
     {ai_option}
@@ -75,15 +74,15 @@ def privacy():
     <h2>2. 접근·수집하는 정보</h2><ul>
     <li>Google 로그인: Google 계정 식별자, 이름, 이메일, 로그인 확인과 API 연결 유지에 필요한 OAuth 인증 토큰.</li>
     <li>Classroom: 본인이 접근할 수 있는 수업 목록과 선택한 수업의 과제·공지·자료 게시물, 제목·본문·등록 기한·게시 시각·게시물 및 첨부 식별정보·원문 링크와 API가 제공하는 게시물 메타데이터. 게시물 본문에 다른 사람의 이름 등이 포함될 수 있습니다.</li>
-    <li>선택적 PDF 읽기: 사용자가 추가 권한을 허용하고 수집을 선택한 경우, 해당 수업 게시물에 첨부된 PDF 파일과 추출한 텍스트. Drive 읽기 권한은 넓은 범위의 접근을 허용하지만, 모아의 수집 기능은 선택한 게시물의 첨부 참조를 이용합니다.</li>
+    <li>기존 PDF 자료: 개발 중 사용자가 별도로 허용하여 이미 읽은 첨부 PDF와 추출한 텍스트는 보관할 수 있습니다. 현재 공개 웹 로그인에서는 Drive 권한을 요청하지 않으며, 새 PDF를 자동으로 다운로드하지 않습니다.</li>
     <li>개인 기록: 완료 표시, 관심 활동, 메모, 사용자가 입력한 기한, 수업 선택과 작업 진행 정보.</li>
     <li>연결 유지와 운영: 로그인 세션, 임시 OAuth 연결 상태, 고정된 로그인 단계·결과별 횟수와 마지막 발생 시각. 진단 집계에는 계정 이름·이메일·인증 코드·토큰을 저장하지 않습니다.</li></ul>
     <h2>3. 이용 목적과 선택 권한</h2><p>이 정보는 본인 확인, 수업 선택과 수집, 과제·활동 및 신청 기한 정리, 원문 확인, 개인 기록 저장, 연결 유지와 오류 확인에 사용합니다.
     각 사용자는 자신의 Google 계정으로 접근할 수 있는 수업과 자신의 개인 기록을 확인합니다. Classroom 게시물을 변경하거나 과제를 대신 제출하는 데 사용하지 않습니다.
-    PDF 읽기와 AI 정리는 선택 기능입니다. Google에서 권한을 취소하면 해당 권한이 필요한 기능을 사용할 수 없습니다.</p>
+    AI 정리는 선택 기능입니다. 기존 PDF 텍스트가 있으면 동의한 분석에 함께 사용합니다. Google에서 권한을 취소하면 해당 권한이 필요한 기능을 사용할 수 없습니다.</p>
     <h2>4. 처리에 사용하는 외부 서비스</h2><ul>
-    <li>Google: 계정 인증과 사용자가 허용한 Classroom·Drive API 조회를 제공합니다.</li>
-    <li>Render: 웹서버를 실행하며 요청 처리에 필요한 계정·수업 정보와 선택적으로 다운로드한 첨부 파일을 처리합니다.</li>
+    <li>Google: 계정 인증과 사용자가 허용한 Classroom API 조회를 제공합니다. 공개 웹서비스는 Drive API 다운로드를 실행하지 않습니다.</li>
+    <li>Render: 웹서버를 실행하며 요청 처리에 필요한 계정·수업 정보와 기존에 저장된 첨부 텍스트를 처리합니다.</li>
     <li>Neon: 계정 정보, 암호화된 Google 인증 토큰, 수집한 게시물, 개인 기록 및 분석 캐시를 비공개 데이터베이스에 저장합니다.</li>
     <li>BAZE: 운영자가 AI 기능을 활성화하고 사용자가 AI 정리 실행에 동의한 경우, 분석 대상 게시물의 제목·본문·시각·기한·식별정보,
     추출한 PDF 텍스트 및 관련 후속·이전 안내 문맥을 전달해 분석 응답을 받습니다. Google 인증 토큰과 개인 메모를 분석 입력으로 보내지 않습니다.</li></ul>

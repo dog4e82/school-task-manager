@@ -95,7 +95,15 @@ def merge_results(job, records):
 
 
 def run_extended_analysis(client, cache, jobs, model, limit=None, retry_failed=False,
-                          dry_run=False, progress=None, minimum_credits=None, stop_requested=None):
+                          dry_run=False, progress=None, minimum_credits=None, stop_requested=None, exclude_expired=False):
+    if exclude_expired:
+        from analysis_selection import select_jobs
+        active,expired=select_jobs(jobs)
+        result=run_extended_analysis(client,cache,active,model,limit,retry_failed,dry_run,
+                                     progress,minimum_credits,stop_requested)
+        result['total_source']=len(jobs)
+        result['expired']=len(expired)
+        return result
     large, normal = [], []
     for job in jobs:
         (large if len(json.dumps(job['payload']['current'], ensure_ascii=False)) > MAX_CHARS else normal).append(job)

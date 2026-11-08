@@ -26,6 +26,27 @@ class UiDataTests(unittest.TestCase):
         self.assertEqual(result["stats"]["analyzed"], 0)
         self.assertEqual(result["tasks"][0]["status"], "pending")
         self.assertFalse(result["tasks"][0]["analyzed"])
+
+    def test_pdf_text_stays_available_for_analysis_but_is_not_copied_to_dashboard(self):
+        from notice_ai import prepare, DEFAULT_MODEL
+        source=snapshot()
+        text='private-extracted-pdf-text-'*1000
+        source['assignments'][0]['attachments']=[{'file_id':'f','title':'guide.pdf','status':'text_extracted',
+                                                  'pages':[{'page':1,'text':text}]}]
+        cache=Mock();cache.get.return_value=None
+        result=build_data(source,cache,'')
+        self.assertNotIn(text,json.dumps(result))
+        self.assertEqual(result['posts'][0]['attachments'][0]['pages'],[{'page':1}])
+        self.assertEqual(prepare(source,DEFAULT_MODEL,'')[0]['payload']['current']['documents'][0]['pages'][0]['text'],text)
+
+    def test_missing_resource_metadata_does_not_copy_arbitrary_error_contents(self):
+        source=snapshot();source['complete']=False
+        source['failures']=[{'course_id':'c','resource':'announcements','raw_error':'private-token-must-stay-out'}]
+        cache=Mock();cache.get.return_value=None
+        result=build_data(source,cache,'')
+        self.assertFalse(result['stats']['collectionComplete'])
+        self.assertEqual(result['stats']['collectionFailures'],[{'courseId':'c','resource':'announcements'}])
+        self.assertNotIn('private-token-must-stay-out',json.dumps(result))
         self.assertEqual(result["tasks"][0]["due"], "2026-11-08T23:59:00+09:00")
         self.assertTrue(result["tasks"][0]["apiDue"])
         self.assertTrue(result["tasks"][0]["deadlineConfirmed"])

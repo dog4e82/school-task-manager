@@ -142,14 +142,14 @@ class WebTests(unittest.TestCase):
             with patch('webapp.Flow.from_client_config') as flow:
                 start=client.get('/auth/google?pdf=1&code=private-ignored-code')
                 flow.assert_not_called()
-            self.assertEqual(start.headers['location'],'https://app.moa.example.invalid/auth/google?pdf=1')
+            self.assertEqual(start.headers['location'],'https://app.moa.example.invalid/auth/google')
             self.assertNotIn('set-cookie',start.headers)
             with domain_app.state.store.db() as db:
                 self.assertEqual(db.execute('SELECT COUNT(*) FROM oauth_states').fetchone()[0],0)
             canonical=client.get(start.headers['location'])
             query=parse_qs(urlsplit(canonical.headers['location']).query)
             self.assertEqual(query['redirect_uri'],[domain_settings.callback])
-            self.assertIn('https://www.googleapis.com/auth/drive.readonly',query['scope'][0].split())
+            self.assertNotIn('https://www.googleapis.com/auth/drive.readonly',query['scope'][0].split())
             binding=[cookie for cookie in client.cookies.jar if cookie.name=='moa_oauth']
             self.assertEqual(len(binding),1)
             self.assertEqual(binding[0].domain,'app.moa.example.invalid')
@@ -172,7 +172,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual(client.get('/health').status_code,200)
             self.assertEqual(client.get('/').status_code,200)
             login=client.get('/auth/google?pdf=1')
-            self.assertEqual(login.headers['location'],'https://moa-classroom.onrender.com/auth/google?pdf=1')
+            self.assertEqual(login.headers['location'],'https://moa-classroom.onrender.com/auth/google')
             self.assertNotIn('set-cookie',login.headers)
             self.assertEqual(client.get('https://unknown.moa-classroom.dynv6.net/health').status_code,400)
 
@@ -314,12 +314,12 @@ class WebTests(unittest.TestCase):
         self.store.finish_job(self.a, first, 'done', '완료')
         self.assertTrue(self.store.new_job(self.a, 'analyze', '2026-11-08', limit=500, daily_limit=0, global_limit=0))
 
-    def test_setup_emphasizes_pdf_before_course_selection_and_identifies_ai_transfer(self):
+    def test_setup_uses_body_only_and_identifies_ai_transfer(self):
         self.settings.ai_enabled = True
         self.login(self.a)
         page = self.client.get('/setup').text
-        self.assertLess(page.index('id="pdf-first-title"'), page.index('id="course-options"'))
-        self.assertIn('href="/auth/google?pdf=1"', page)
+        self.assertNotIn('/auth/google?pdf=1', page)
+        self.assertNotIn('id="include-pdf"', page)
         self.assertIn('BAZE로 보내는 데 동의', page)
         self.assertIn('id="auto-analyze"', page)
 
@@ -338,6 +338,38 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/jobs/'+response.json()['job_id']).json()['status'], 'done')
         self.assertEqual(analyze.call_args.kwargs['minimum_credits'], 2000)
         self.assertTrue(self.store.snapshot(self.a)['auto_analysis_consent'])
+
+    def test_public_sync_rejects_drive_even_for_previous_grants(self):
+        headers = self.login(self.a)
+        info = credentials('a'); info['scopes'] = SYNC_SCOPES
+        self.store.update_credentials(self.a, info)
+        with patch('webapp.build') as google:
+            response = self.client.post('/api/sync', json={'course_ids': ['a'], 'include_pdf': True}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        google.assert_not_called()
+
+    def test_plain_sync_preserves_only_still_attached_pdf_pages(self):
+        prior = snapshot('a')
+        prior['assignments'][0]['attachments'] = [
+            {'file_id': 'same-file', 'pages': [{'page': 1, 'text': 'saved private page'}], 'status': 'text_extracted'},
+            {'file_id': 'removed-file', 'pages': [{'page': 1, 'text': 'removed private page'}], 'status': 'text_extracted'}]
+        self.store.save_snapshot(self.a, prior)
+        current = snapshot('a')
+        service = Mock()
+        service.courses.return_value.list.return_value.execute.return_value = {'courses': [{'id': 'a', 'name': 'A'}]}
+        headers = self.login(self.a)
+        refs = [{'file_id': 'same-file', 'status': 'not_read'}, {'file_id': 'new-file', 'status': 'not_read'}]
+        with patch('webapp.build', return_value=service), patch('webapp.collect_snapshot', return_value=current), \
+             patch('webapp.references', return_value=refs), patch('webapp.enrich_snapshot') as download, \
+             patch.object(self.app.state.executor, 'submit', side_effect=lambda fn,*args: fn(*args)):
+            response = self.client.post('/api/sync', json={'course_ids': ['a']}, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        download.assert_not_called()
+        attachments = self.store.snapshot(self.a)['assignments'][0]['attachments']
+        self.assertEqual(len(attachments), 2)
+        self.assertEqual(attachments[0]['pages'][0]['text'], 'saved private page')
+        self.assertTrue(attachments[0]['cached_copy'])
+        self.assertNotIn('pages', attachments[1])
 
     def test_running_job_progress_preserves_early_dashboard_readiness(self):
         job = self.store.new_job(self.a, 'sync', '2026-11-08')
@@ -387,7 +419,7 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('https://www.googleapis.com/auth/drive.readonly',query['scope'][0].split())
         pdf=self.client.get('/auth/google?pdf=1')
         pdf_query=parse_qs(urlsplit(pdf.headers['location']).query)
-        self.assertIn('https://www.googleapis.com/auth/drive.readonly',pdf_query['scope'][0].split())
+        self.assertNotIn('https://www.googleapis.com/auth/drive.readonly',pdf_query['scope'][0].split())
 
     def test_oauth_uses_pkce_nonce_and_verified_identity(self):
         flows=[]
