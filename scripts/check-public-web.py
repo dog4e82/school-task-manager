@@ -38,7 +38,7 @@ def main():
 
     status, headers, body = get("/")
     check("public_home", status == 200 and 'href="/auth/google"' in body and 'id="app-data"' not in body)
-    check("homepage_brand_and_purpose", '<h1>모아</h1>' in body and '학생이 자신의 Google Classroom' in body)
+    check("homepage_brand_and_purpose", '<h1>모아</h1>' in body and 'Google Classroom의 과제' in body)
     check("homepage_privacy_link", 'href="'+origin+'/privacy"' in body)
     check("homepage_head_accessible", get('/', method='HEAD')[0] == 200)
     check("private_cache_policy", "no-store" in headers.get("Cache-Control", ""))

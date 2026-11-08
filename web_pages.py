@@ -27,21 +27,23 @@ def landing(configured, error=None, public_origin=""):
               "oauth_session_failed": "로그인 세션을 만들지 못했어요. 연결 오류 코드: LOGIN-SESSION. 운영자에게 이 코드를 알려 주세요.",
               "state_expired": "로그인 시간이 지났거나 이 브라우저에서 시작한 연결이 아니에요. 다시 시작해 주세요."}
     notice = f'<p class="notice">{errors[error]}</p>' if error in errors else ""
-    action = '<a class="primary" href="/auth/google">Google로 Classroom 연결 <span>↗</span></a>' if configured else '<p class="notice">웹 연결을 준비하고 있습니다. 운영자의 연결 설정이 끝나면 로그인할 수 있어요.</p>'
+    action = '<p class="action-guide" id="login-guide">아래 버튼을 눌러 시작하세요.</p><a class="primary start-action" id="start-login" href="/auth/google" aria-describedby="login-guide"><span>Google로 시작하기</span><span aria-hidden="true">→</span></a>' if configured else '<p class="notice">로그인 연결을 준비 중이에요.</p>'
     privacy_url = html.escape(public_origin.rstrip("/") + "/privacy", quote=True)
     return page("모아", f'''<section class="welcome public-welcome">
-    <h1>모아</h1><p class="welcome-title">해야 할 과제부터,<br>도전하고 싶은 활동까지.</p>
-    <p class="service-purpose">모아는 학생이 자신의 Google Classroom에 흩어진 과제·공지·수업 자료를 한곳에서 확인하는 학습 관리 웹서비스입니다.
-    제출 마감과 대회·활동 신청 기한을 가까운 순서로 정리하고, 원문으로 돌아가 내용을 확인할 수 있습니다.</p>
+    <h1>모아</h1><p class="welcome-title">내 과제와 신청 기한,<br>한곳에서 확인하세요.</p>
+    <p class="service-purpose">Google Classroom의 과제·공지와 대회 신청 기한을 가까운 순서로 모아 보여 줍니다.</p>
+    <section class="public-connection" aria-label="시작하기">
+    <ol class="connect-steps" aria-label="연결 순서"><li aria-current="step"><span>1</span>학교 계정 로그인</li><li><span>2</span>읽기 권한 허용</li><li><span>3</span>수업 선택</li></ol>
+    {notice}{action}
+    <p class="permission-guide">다음 Google 화면에서 <strong>학교 계정</strong>을 선택하고<br>요청한 <strong>Classroom 읽기 권한을 모두 허용</strong>해 주세요.</p>
+    <a class="dashboard-link" href="/app">이미 연결했다면 내 대시보드</a>
+    </section>
     <div class="public-features">
-      <section><h2>▤ 과제 모아보기</h2><p>선택한 수업의 과제와 공지를 읽어 과목별 할 일과 제출 기한을 모읍니다.</p></section>
-      <section><h2>♧ 대회·신청</h2><p>선택해서 참여할 활동의 신청 기간과 학교 내부 신청 기한을 함께 확인합니다.</p></section>
-      <section><h2>▦ 본문과 첨부 확인</h2><p>게시물 본문을 펼쳐 보고 원문 링크로 교차 확인합니다. 새 첨부 파일의 내용은 Classroom 원문에서 확인해 주세요.</p></section>
+      <section><h2>▤ 과제 마감</h2><p>해야 할 일을 가까운 기한부터.</p></section>
+      <section><h2>♧ 대회·신청</h2><p>참여하고 싶은 활동의 신청일까지.</p></section>
+      <section><h2>▦ 원문 확인</h2><p>본문을 펼쳐 보고 Classroom에서 확인.</p></section>
     </div>
-    <section class="public-connection"><h2>내 수업 연결하기</h2>
-    <p>Google 계정으로 연결하고 모아 볼 수업을 직접 선택하세요. 수업 목록·과제·공지·자료 읽기 권한은 이 기능을 제공하기 위해 사용합니다.
-    연결한 계정이 접근할 수 있는 수업과 그 계정의 개인 기록만 표시합니다.</p>{notice}{action}<a class="dashboard-link" href="/app">내 대시보드</a>
-    <p class="small">Classroom 게시물을 수정하거나 대신 제출하지 않습니다. AI 정리는 별도 선택 기능이며 제안한 날짜는 원문에서 확인해 주세요.</p></section>
+    <p class="small">내 계정의 수업만 표시합니다. 게시물을 수정하거나 대신 제출하지 않습니다. AI 정리는 선택할 수 있으며 날짜는 원문에서 확인해 주세요.</p>
     <footer class="public-footer"><a href="{privacy_url}">모아 개인정보처리방침</a><a href="mailto:{SUPPORT_EMAIL}">문의: {SUPPORT_EMAIL}</a></footer>
     </section>''', description="모아는 Google Classroom 과제·공지·자료와 대회·활동 신청 기한을 한곳에 모아 확인하는 학생용 학습 관리 서비스입니다.")
 
@@ -49,17 +51,20 @@ def landing(configured, error=None, public_origin=""):
 def setup(user, csrf, selected, has_drive, ai_enabled):
     has_drive = False
     ai_option = ('<label class="ai-choice"><input id="auto-analyze" type="checkbox" checked>'
-                 '<span>연결 후 새 공지 AI 정리<small>본문과 추출된 PDF 텍스트를 BAZE로 보내는 데 동의합니다. 같은 자료의 저장된 결과는 재사용합니다.</small></span></label>'
-                 if ai_enabled else '<p class="small">Classroom 본문부터 연결합니다. AI 정리는 준비되는 대로 사용할 수 있어요.</p>')
-    return page("수업 연결", f'''<section class="setup"><span class="kicker">나의 학습 공간</span><h1>모아 볼 수업을 골라 주세요.</h1>
-    <p>{html.escape(user['name'])}님의 계정에서 접근할 수 있는 수업을 불러옵니다.</p>
-    <p class="small">Drive 추가 권한 없이 Classroom 본문부터 연결합니다. PDF 자동 읽기는 현재 제외했으며, 이미 저장된 PDF와 분석 결과는 유지합니다. 새 첨부의 내용은 원문에서 확인해 주세요.</p>
+                 '<span>새 공지 AI 정리<small>본문·기존 PDF 텍스트를 BAZE로 보내는 데 동의합니다.</small></span></label>'
+                 if ai_enabled else '')
+    previous_link = '<a class="dashboard-link" href="/app">이미 불러온 과제 보기</a>' if selected else ''
+    return page("수업 연결", f'''<section class="setup">
+    <ol class="connect-steps" aria-label="연결 순서"><li class="step-done"><span>✓</span>로그인</li><li class="step-done"><span>✓</span>권한 허용</li><li aria-current="step"><span>3</span>수업 선택</li></ol>
+    <h1>수업을 선택해 주세요.</h1>
+    <p>체크한 수업의 과제와 공지를 가져옵니다.</p>
     <div id="account-message" class="notice" role="status" hidden></div><div class="choose-toolbar"><button id="select-all">전체 선택</button><button id="select-none">선택 해제</button></div>
     <div id="course-options" class="course-options"><p>수업을 불러오는 중…</p></div>
     {ai_option}
-    <div class="setup-actions"><button class="primary" id="sync-courses" disabled>선택한 수업 연결</button><a href="/app">내 대시보드</a></div>
+    <div class="setup-actions"><p id="selection-hint" class="action-guide" aria-live="polite">수업 선택 후 아래 버튼을 눌러 주세요.</p><button class="primary start-action" id="sync-courses" aria-describedby="selection-hint" disabled>수업을 먼저 선택해 주세요</button></div>
     <div id="job-progress" class="job-progress" hidden role="status"><span class="spinner"></span><span id="job-stage">연결 준비 중</span></div>
-    <p class="small">한 게시물의 여러 과제·활동은 나누어 정리합니다. 학교 계정의 분석 건수 제한은 없으며 잔액이 2,000크레딧 미만이면 새 분석을 멈춥니다. 다른 사용자의 수업이나 개인 기록은 표시하지 않습니다.</p>
+    {previous_link}
+    <details class="connection-details"><summary>연결·AI 안내</summary><p>기존 분석은 재사용하고 한 게시물의 여러 할 일은 나누어 표시합니다. 새 PDF는 자동으로 읽지 않으니 첨부는 원문에서 확인해 주세요. AI 분석은 서비스 잔액이 2,000크레딧 미만이면 멈춥니다. 내 수업과 개인 기록만 표시합니다.</p></details>
     <button id="logout" class="text-button">로그아웃</button></section>''',
     {"csrf": csrf, "selected": selected, "aiEnabled": ai_enabled, "hasDrive": has_drive, "page": "setup"})
 

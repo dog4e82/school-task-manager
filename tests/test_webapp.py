@@ -63,7 +63,7 @@ class WebTests(unittest.TestCase):
     def test_anonymous_home_does_not_include_existing_school_data(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Google로 Classroom", response.text)
+        self.assertIn("Google로 시작하기", response.text)
         self.assertNotIn("private-course", response.text)
         self.assertEqual(self.client.get("/api/data").status_code, 401)
         self.assertEqual(self.client.get("/app").headers["location"], "/")
@@ -113,7 +113,7 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(self.client.head(path).status_code,200)
             home=self.client.get('/').text
             self.assertIn('<h1>모아</h1>',home)
-            self.assertIn('학생이 자신의 Google Classroom',home)
+            self.assertIn('Google Classroom의 과제',home)
             self.assertIn('href="'+self.settings.base_url+'/privacy"',home)
             self.assertIn('개인정보처리방침',home)
         google.assert_not_called()
