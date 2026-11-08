@@ -32,7 +32,8 @@ from classroom import READ_SCOPES, SYNC_SCOPES, list_courses
 from classroom_data import collect_snapshot, SEOUL
 from classroom_pdf import enrich_snapshot, references
 from main import Client
-from notice_ai import Cache, DEFAULT_MODEL, prepare, run_analysis, post_key
+from notice_ai import Cache, DEFAULT_MODEL, prepare, post_key
+from chunked_analysis import run_extended_analysis as run_analysis
 from task_priority import prioritize_posts
 from ui import render_html
 from ui_data import build_data, SavedAnalyses
@@ -74,12 +75,13 @@ class SyncBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_ids: list[str] = Field(min_length=1, max_length=50)
     include_pdf: bool = False
+    analyze_after_sync: bool = False
 
 
 class AnalyzeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     consent: bool
-    limit: int = Field(default=3, ge=1, le=3)
+    limit: int | None = Field(default=None, ge=1)
 
 
 class PersonalBody(BaseModel):
@@ -172,6 +174,16 @@ def create_app(settings=None):
             raise HTTPException(403, "이 화면에서 시작한 요청인지 확인하지 못했습니다. 새로고침해 주세요.")
         return value
 
+    def school_allowed(user):
+        return bool(user) and (not settings.school_domain or
+                              user.get('email', '').rpartition('@')[2].lower() == settings.school_domain)
+
+    def require_ai(user_id):
+        if not settings.ai_enabled or not settings.baze_base or not settings.baze_key:
+            raise HTTPException(503, '공지 AI 정리는 운영자가 연결을 준비하고 있습니다.')
+        if not school_allowed(store.get_user(user_id)):
+            raise HTTPException(403, '공지 AI 정리는 우리 학교 계정으로 연결해 주세요.')
+
     def get_credentials(user_id):
         user = store.get_user(user_id)
         if not user:
@@ -206,7 +218,7 @@ def create_app(settings=None):
         finally:
             cache.close()
 
-    def run_sync(user_id, job_id, selected, include_pdf):
+    def run_sync(user_id, job_id, selected, include_pdf, analyze_after_sync=False):
         creds = None
         try:
             store.finish_job(user_id, job_id, "running", "계정의 수업 접근 권한 확인 중")
@@ -222,7 +234,10 @@ def create_app(settings=None):
                 service.close()
             for post in snapshot["assignments"] + snapshot["announcements"] + snapshot["materials"]:
                 post["attachments"] = references(post)
+            snapshot['auto_analysis_consent'] = analyze_after_sync
             store.save_snapshot(user_id, snapshot)
+            store.finish_job(user_id, job_id, 'running', '본문 연결 완료 · 첨부와 AI 정리는 계속 진행합니다.',
+                             {'snapshot_ready': True})
             if include_pdf:
                 if not creds.has_scopes(SYNC_SCOPES):
                     raise ValueError("drive_scope_missing")
@@ -230,12 +245,14 @@ def create_app(settings=None):
                 drive = google_service("drive", creds)
                 try:
                     posts = snapshot["assignments"] + snapshot["announcements"] + snapshot["materials"]
-                    keys = {post_key(p) for p in prioritize_posts(posts)[:10]}
                     enrich_snapshot(snapshot, drive, settings.data_dir / "users" / user_id / "pdf-cache",
-                                    checkpoint=lambda value: store.save_snapshot(user_id, value), post_keys=keys)
+                                    checkpoint=lambda value: store.save_snapshot(user_id, value))
                 finally:
                     drive.close()
             store.save_snapshot(user_id, snapshot)
+            if analyze_after_sync:
+                run_ai(user_id, job_id, None)
+                return
             store.finish_job(user_id, job_id, "done", "수업 연결 완료", {"courses": len(selected), "partial": not snapshot["complete"]})
         except Exception as exc:
             LOGGER.warning("sync_job_failed:%s", type(exc).__name__)
@@ -253,9 +270,18 @@ def create_app(settings=None):
             store.finish_job(user_id, job_id, "running", "현재 안내를 AI로 정리 중 · 저장된 결과는 재사용합니다")
             jobs = prepare(snapshot, DEFAULT_MODEL, settings.baze_base)
             cache = analysis_cache()
-            report = run_analysis(Client(settings.baze_base, settings.baze_key), cache, jobs, DEFAULT_MODEL, limit=limit)
-            store.finish_job(user_id, job_id, "done" if not report["failed"] else "failed",
-                             "정리 완료" if not report["failed"] else "일부 결과를 확인하지 못했어요. 저장된 결과부터 확인하세요.", report)
+            def progress(value):
+                store.finish_job(user_id, job_id, 'running',
+                                 f"새 공지 AI 정리 중 · 신규 호출 {value['calls']}회 · 기존 결과 {value['cached']}개 재사용")
+            report = run_analysis(Client(settings.baze_base, settings.baze_key), cache, jobs, DEFAULT_MODEL,
+                                  limit=limit, progress=progress, minimum_credits=settings.minimum_credits)
+            if report.get('stopped'):
+                stage = ('남은 크레딧이 2,000 미만이라 새 분석을 멈췄어요. 저장된 결과는 계속 볼 수 있어요.'
+                         if report['stopped'] == 'low_credits' else '잔액을 확인하지 못해 새 분석을 멈췄어요. 저장된 결과를 확인하세요.')
+                store.finish_job(user_id, job_id, 'stopped', stage, report)
+            else:
+                store.finish_job(user_id, job_id, "done" if not report["failed"] else "failed",
+                                 "정리 완료" if not report["failed"] else "일부 결과를 확인하지 못했어요. 저장된 결과부터 확인하세요.", report)
         except Exception as exc:
             LOGGER.warning("analysis_job_failed:%s", type(exc).__name__)
             store.finish_job(user_id, job_id, "failed", "AI 연결을 완료하지 못했어요. 자동으로 다시 호출하지 않았습니다.")
@@ -263,10 +289,11 @@ def create_app(settings=None):
             if cache:
                 cache.close()
 
-    def enqueue(user_id, kind, body):
+    def enqueue(user_id, kind, body, planned_limit=None):
+        limit = (planned_limit if planned_limit is not None else body.limit) if kind == 'analyze' else 0
         try:
             job_id = store.new_job(user_id, kind, datetime.now(SEOUL).date().isoformat(),
-                                   body.limit if kind == "analyze" else 0, settings.ai_daily_limit, settings.ai_global_daily_limit)
+                                   limit, settings.ai_daily_limit, settings.ai_global_daily_limit)
         except sqlite3.IntegrityError:
             raise HTTPException(409, "이미 진행 중인 작업이 있습니다.") from None
         except ValueError as exc:
@@ -274,7 +301,7 @@ def create_app(settings=None):
                 raise HTTPException(503, "현재 연결 작업이 많아요. 잠시 후 다시 시도해 주세요.") from None
             raise HTTPException(429, "오늘 실행할 수 있는 AI 정리 횟수에 도달했습니다.") from None
         if kind == "sync":
-            executor.submit(run_sync, user_id, job_id, list(dict.fromkeys(body.course_ids)), body.include_pdf)
+            executor.submit(run_sync, user_id, job_id, list(dict.fromkeys(body.course_ids)), body.include_pdf, body.analyze_after_sync)
         else:
             executor.submit(run_ai, user_id, job_id, body.limit)
         return {"job_id": job_id}
@@ -289,7 +316,9 @@ def create_app(settings=None):
     def health():
         return {"status": "ok", "google_login_configured": settings.configured,
                 "oauth_flow_version": 4, "public_pages_version": 1, "custom_domain_login_version": 2,
-                "multi_item_version": 1}
+                "multi_item_version": 1, "snapshot_history_version": 1,
+                "analysis_policy_version": 1,
+                "ai_generation_enabled": settings.ai_enabled and bool(settings.baze_base and settings.baze_key)}
 
     @app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
     def privacy_page():
@@ -393,7 +422,8 @@ def create_app(settings=None):
         user = store.get_user(current["user_id"])
         prior = store.snapshot(user["id"])
         creds = Credentials.from_authorized_user_info(user["credentials"])
-        return HTMLResponse(setup(user, current["csrf"], [c["id"] for c in prior["courses"]] if prior else [], creds.has_scopes(SYNC_SCOPES), settings.ai_enabled))
+        return HTMLResponse(setup(user, current["csrf"], [c["id"] for c in prior["courses"]] if prior else [], creds.has_scopes(SYNC_SCOPES),
+                                  settings.ai_enabled and bool(settings.baze_base and settings.baze_key) and school_allowed(user)))
 
     @app.get("/app", response_class=HTMLResponse)
     def dashboard(request: Request):
@@ -410,7 +440,9 @@ def create_app(settings=None):
         user = store.get_user(current["user_id"])
         data["web"] = {"userId": user["id"], "name": user["name"], "csrf": current["csrf"],
                        "hasDrive": Credentials.from_authorized_user_info(user["credentials"]).has_scopes(SYNC_SCOPES),
-                       "personal": store.personal(user["id"]), "aiEnabled": settings.ai_enabled and bool(settings.baze_base and settings.baze_key)}
+                       "personal": store.personal(user["id"]),
+                       "autoAnalyze": data.get('autoAnalyze', False),
+                       "aiEnabled": settings.ai_enabled and bool(settings.baze_base and settings.baze_key) and school_allowed(user)}
         return HTMLResponse(render_html(data))
 
     @app.get("/api/courses")
@@ -432,6 +464,8 @@ def create_app(settings=None):
     @app.post("/api/sync", status_code=202)
     def sync(request: Request, body: SyncBody):
         current = mutation(request)
+        if body.analyze_after_sync:
+            require_ai(current['user_id'])
         if any(not value or len(value) > 100 for value in body.course_ids):
             raise HTTPException(422, "수업 선택이 올바르지 않습니다.")
         if body.include_pdf and not get_credentials(current["user_id"]).has_scopes(SYNC_SCOPES):
@@ -441,12 +475,21 @@ def create_app(settings=None):
     @app.post("/api/analyze", status_code=202)
     def analyze(request: Request, body: AnalyzeBody):
         current = mutation(request)
-        if not settings.ai_enabled or not settings.baze_base or not settings.baze_key:
-            raise HTTPException(503, "공지 AI 정리는 운영자가 연결을 준비하고 있습니다.")
+        require_ai(current['user_id'])
         if not body.consent:
             raise HTTPException(400, "선택한 공지를 BAZE로 전송하는 데 동의해야 합니다.")
-        data_for(current["user_id"])
-        return enqueue(current["user_id"], "analyze", body)
+        snapshot = store.snapshot(current['user_id'])
+        if snapshot is None:
+            raise HTTPException(409, '먼저 모아 볼 수업을 선택해 주세요.')
+        cache = analysis_cache(readonly=True)
+        try:
+            plan = run_analysis(None, cache, prepare(snapshot, DEFAULT_MODEL, settings.baze_base),
+                                DEFAULT_MODEL, dry_run=True)
+        finally:
+            cache.close()
+        if not plan['pending']:
+            return {'reused': True, 'report': plan}
+        return enqueue(current['user_id'], 'analyze', body, min(body.limit, plan['pending']) if body.limit is not None else plan['pending'])
 
     @app.get("/api/jobs/latest")
     def latest(request: Request):

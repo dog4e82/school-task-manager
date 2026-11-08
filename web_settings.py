@@ -40,9 +40,11 @@ class Settings:
     baze_base: str = ""
     baze_key: str = ""
     ai_enabled: bool = False
-    ai_daily_limit: int = 3
-    ai_global_daily_limit: int = 30
+    ai_daily_limit: int = 0
+    ai_global_daily_limit: int = 0
     database_url: str = ""
+    minimum_credits: int = 2000
+    school_domain: str = ""
 
     @property
     def secure(self):
@@ -112,6 +114,6 @@ class Settings:
         return cls(base, directory, key, client_id,
                    client_secret, os.environ.get("BAZE_BASE_URL", "").strip(),
                    os.environ.get("BAZE_API_KEY", "").strip(), os.environ.get("WEB_AI_ENABLED", "false").lower() == "true",
-                   max(1, min(30, int(os.environ.get("WEB_AI_DAILY_LIMIT") or "3"))),
-                   max(1, min(3000, int(os.environ.get("WEB_AI_GLOBAL_DAILY_LIMIT") or "30"))),
-                   database_url)
+                   0, 0, database_url, 2000,
+                   (os.environ.get('SCHOOL_EMAIL_DOMAIN', '').strip().lower()
+                    or ('js.hs.kr' if os.environ.get('RENDER_EXTERNAL_URL') else '')))

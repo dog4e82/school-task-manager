@@ -47,21 +47,27 @@ def landing(configured, error=None, public_origin=""):
 
 
 def setup(user, csrf, selected, has_drive, ai_enabled):
+    pdf_action = ('<label class="pdf-choice"><input id="include-pdf" type="checkbox" checked> 첨부 PDF 함께 읽기</label>'
+                  if has_drive else '<a class="pdf-connect" href="/auth/google?pdf=1">PDF 읽기 연결 <span aria-hidden="true">↗</span></a>')
+    ai_option = ('<label class="ai-choice"><input id="auto-analyze" type="checkbox" checked>'
+                 '<span>연결 후 새 공지 AI 정리<small>본문과 추출된 PDF 텍스트를 BAZE로 보내는 데 동의합니다. 같은 자료의 저장된 결과는 재사용합니다.</small></span></label>'
+                 if ai_enabled else '<p class="small">본문과 PDF부터 연결합니다. AI 정리는 준비되는 대로 사용할 수 있어요.</p>')
     return page("수업 연결", f'''<section class="setup"><span class="kicker">나의 학습 공간</span><h1>모아 볼 수업을 골라 주세요.</h1>
     <p>{html.escape(user['name'])}님의 계정에서 접근할 수 있는 수업을 불러옵니다.</p>
+    <section class="pdf-first" aria-labelledby="pdf-first-title"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6ZM14 3v6h6M8 13h8M8 17h5"/></svg><div><h2 id="pdf-first-title">PDF까지 읽고 시작하기 <span>권장</span></h2><p>모집 요강·안내문 속 제출 조건과 신청 기한도 함께 확인해요.</p>{pdf_action}<small>PDF가 많으면 시간이 더 걸릴 수 있어요. 스캔 PDF나 지원하지 않는 파일은 원문 확인이 필요해요.</small></div></section>
     <div id="account-message" class="notice" role="status" hidden></div><div class="choose-toolbar"><button id="select-all">전체 선택</button><button id="select-none">선택 해제</button></div>
     <div id="course-options" class="course-options"><p>수업을 불러오는 중…</p></div>
-    <div class="pdf-option">{'<label><input id="include-pdf" type="checkbox"> 현재 안내의 첨부 PDF도 확인</label>' if has_drive else '<a href="/auth/google?pdf=1">첨부 PDF 읽기 권한도 연결하기 ↗</a>'}<small>기본 연결로 과제·공지 본문의 기한을 먼저 정리합니다.</small></div>
+    {ai_option}
     <div class="setup-actions"><button class="primary" id="sync-courses" disabled>선택한 수업 연결</button><a href="/app">내 대시보드</a></div>
     <div id="job-progress" class="job-progress" hidden role="status"><span class="spinner"></span><span id="job-stage">연결 준비 중</span></div>
-    <p class="small">공지의 AI 정리는 연결 후 별도로 선택합니다. 다른 사용자의 수업이나 개인 기록은 공유되지 않습니다.</p>
+    <p class="small">한 게시물의 여러 과제·활동은 나누어 정리합니다. 학교 계정의 분석 건수 제한은 없으며 잔액이 2,000크레딧 미만이면 새 분석을 멈춥니다. 다른 사용자의 수업이나 개인 기록은 표시하지 않습니다.</p>
     <button id="logout" class="text-button">로그아웃</button></section>''',
     {"csrf": csrf, "selected": selected, "aiEnabled": ai_enabled, "hasDrive": has_drive, "page": "setup"})
 
 
 def privacy():
     return page("모아 개인정보처리방침", f'''<article class="policy">
-    <h1>모아 개인정보처리방침</h1><p class="policy-date">시행일·최종 수정일: 2026년 11월 7일</p>
+    <h1>모아 개인정보처리방침</h1><p class="policy-date">시행일: 2026년 11월 7일 · 최종 수정일: 2026년 11월 8일</p>
     <p>모아는 Google Classroom의 과제·공지·자료와 선택 활동의 신청 기한을 모아 보는 학습 관리 서비스입니다.
     이 방침은 모아 웹서비스에서 Google 계정을 연결할 때 접근하는 정보, 이용 목적, 외부 서비스 처리, 보관과 삭제 방법을 설명합니다.</p>
     <h2>1. 운영 및 문의</h2><p>운영 주체는 모아 서비스 운영자입니다. 개인정보 열람·정정·삭제 및 서비스 문의는
@@ -89,6 +95,7 @@ def privacy():
     <p>Google API를 통해 받은 정보의 사용과 다른 앱으로의 전송에는 제한적 사용 요건을 포함한
     <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>를 따릅니다.</p>
     <h2>6. 보관 기간과 삭제</h2><p>계정 연결 정보, 수집본과 개인 기록은 연결된 계정의 기능을 제공하는 동안 보관합니다.
+    동기화에서 관측한 등록 기한·본문 변경 내역은 계정별 수집본 안에 최근 100건까지 보관하며, 다른 계정에 공유하지 않습니다.
     로그인 세션은 최대 7일, 로그인 진행을 위한 임시 연결 상태는 최대 10분 동안 유효합니다. 만료된 상태는 이후 정리 과정에서 제거합니다.</p>
     <p>대시보드에서 <strong>연결 해제·내 데이터 삭제</strong>를 실행하면 Google 연결을 취소하고 운영 중인 데이터베이스에서 해당 계정의 인증정보·수집본·개인 기록·세션·작업 기록을 삭제하며 서버의 해당 계정 첨부 캐시도 제거합니다.
     진행 중인 수집·분석 작업이 있으면 작업이 끝난 뒤 삭제할 수 있습니다. Google 계정의

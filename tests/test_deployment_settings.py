@@ -39,6 +39,14 @@ class DeploymentSettingsTests(unittest.TestCase):
         self.assertFalse(result.database_url)
         self.assertEqual(result.callback,"http://127.0.0.1:8000/auth/callback")
 
+    def test_hosted_school_policy_uses_credit_floor_instead_of_daily_caps(self):
+        result = self.settings({'RENDER_EXTERNAL_URL': 'https://actual-domain.onrender.com',
+                                'DATABASE_URL': 'postgresql://test:synthetic@db.example.invalid/moa?sslmode=require',
+                                'WEB_AI_DAILY_LIMIT': '3', 'WEB_AI_GLOBAL_DAILY_LIMIT': '30', 'SCHOOL_EMAIL_DOMAIN': ' '})
+        self.assertEqual((result.ai_daily_limit, result.ai_global_daily_limit), (0, 0))
+        self.assertEqual(result.minimum_credits, 2000)
+        self.assertEqual(result.school_domain, 'js.hs.kr')
+
     def test_manual_paste_of_quoted_oauth_values_removes_only_outer_quotes(self):
         for quote in ('"', "'"):
             with self.subTest(quote=quote):

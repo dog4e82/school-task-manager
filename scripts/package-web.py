@@ -17,7 +17,7 @@ files += [p for directory in ("web", "docs") for p in (ROOT / directory).rglob("
 files += [ROOT / 'public-site' / path for path in ('index.html', 'privacy/index.html', 'assets/account.css', 'robots.txt')
           if (ROOT / 'public-site' / path).is_file()]
 files += list((ROOT / "tests").glob("test_*.py"))
-files += [ROOT / "scripts" / name for name in ("package-web.py", "prepare-render-env.py", "check-postgres.py", "check-public-web.py", "export-public-site.py")]
+files += [ROOT / "scripts" / name for name in ("package-web.py", "prepare-render-env.py", "prepare-render-ai-env.py", "check-postgres.py", "check-public-web.py", "export-public-site.py")]
 
 # Compare actual local credentials in memory; never print their values.
 private_values = set()

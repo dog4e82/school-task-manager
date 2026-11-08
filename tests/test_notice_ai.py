@@ -196,6 +196,68 @@ class CacheAndCallTests(unittest.TestCase):
         record = self.cache.get(jobs()[0]["key"])
         self.assertIsNone(record["metrics"]["billing"])
 
+    def test_bulk_cache_lookup_is_used_before_queue_planning(self):
+        class BulkCache:
+            def __init__(self):
+                self.loaded = None
+            def preload(self, keys):
+                self.loaded = set(keys)
+            def get(self, key):
+                self.asserted = key in self.loaded
+                if not self.asserted:
+                    raise AssertionError('queue read before bulk load')
+                return {'status': 'success'}
+        cache = BulkCache()
+        prepared = jobs([post(ident=str(i)) for i in range(30)])
+        obj = client()
+        result = run_analysis(obj, cache, prepared, DEFAULT_MODEL, dry_run=True)
+        self.assertEqual(result['cached'], 30)
+        self.assertEqual(len(cache.loaded), 30)
+        obj.request.assert_not_called()
+
+    def test_progress_does_not_expose_source_and_failure_cannot_repeat_generation(self):
+        received = []
+        def progress(value):
+            received.append(value)
+            raise RuntimeError('status unavailable')
+        obj = client()
+        result = run_analysis(obj, self.cache, jobs(), DEFAULT_MODEL, progress=progress)
+        self.assertEqual(result['succeeded'], 1)
+        obj.request.assert_called_once()
+        self.assertEqual(received[0]['calls'], 1)
+        self.assertNotIn('post', received[0])
+
+    def test_credit_floor_is_checked_before_each_call_and_stops_without_claiming_next(self):
+        obj = client()
+        obj.balance.side_effect = [{'total': {'remaining': value}} for value in (2010, 1999, 1999)]
+        prepared = jobs([post(ident=str(i)) for i in range(3)])
+        result = run_analysis(obj, self.cache, prepared, DEFAULT_MODEL, limit=3, minimum_credits=2000)
+        self.assertEqual(result['calls'], 1)
+        self.assertEqual(result['stopped'], 'low_credits')
+        self.assertEqual(result['pending'], 2)
+        obj.request.assert_called_once()
+        self.assertIsNone(self.cache.get(prepared[1]['key']))
+
+    def test_insufficient_or_unverifiable_balance_never_generates(self):
+        for remaining in (1999, 'NaN', None):
+            with self.subTest(remaining=remaining):
+                obj = client()
+                obj.balance.return_value = {'total': {'remaining': remaining}}
+                result = run_analysis(obj, self.cache, jobs(), DEFAULT_MODEL, minimum_credits=2000)
+                self.assertIn(result['stopped'], ('low_credits', 'balance_unavailable'))
+                obj.request.assert_not_called()
+
+    def test_exact_floor_can_generate_and_deadline_stop_never_calls_provider(self):
+        obj = client()
+        obj.balance.return_value = {'total': {'remaining': 2000}}
+        self.assertEqual(run_analysis(obj, self.cache, jobs(), DEFAULT_MODEL, minimum_credits=2000)['calls'], 1)
+        other = client()
+        result = run_analysis(other, self.cache, jobs([post(ident='deadline')]), DEFAULT_MODEL,
+                              stop_requested=lambda: 'deadline')
+        self.assertEqual(result['stopped'], 'deadline')
+        other.request.assert_not_called()
+        other.models.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

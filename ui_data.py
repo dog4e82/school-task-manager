@@ -47,10 +47,11 @@ def build_data(snapshot, cache, provider, today=None):
         for source in raw.get("attachments", []):
             attachments.append({field: source.get(field) for field in
                                 ("file_id", "title", "url", "status", "pages", "total_pages", "unread_pages")})
+        changes = [entry for entry in snapshot.get('change_history', []) if entry.get('post_id') == key]
         posts.append({"id": key, "title": raw.get("title") or raw.get("text", "").split("\n", 1)[0][:100] or "제목 없는 게시물",
                       "courseId": raw["course_id"], "courseName": raw.get("course_name", ""), "source": raw["source"],
                       "text": raw.get("text", ""), "url": raw.get("original_url"), "due": raw.get("due_at"),
-                      "created": raw.get("raw", {}).get("creationTime"), "attachments": attachments,
+                      "created": raw.get("raw", {}).get("creationTime"), "attachments": attachments, "changes": changes,
                       "analyzed": bool((cache.get(job["key"]) or {}).get("status") == "success")})
     tasks = []
     task_keys = Counter((post_key(row['post']), row['item'].get('source_item_key') or
@@ -71,6 +72,7 @@ def build_data(snapshot, cache, provider, today=None):
                           "postId": source_key, "courseId": raw["course_id"], "courseName": raw.get("course_name", ""),
                           "title": item.get("title", ""), "action": item.get("action") or item.get("title", ""),
                           "status": row["status"], "group": group, "due": row["due"], "apiDue": api_due,
+                          "taskConfirmed": item.get('task_status') == row['status'] and row['status'] in ('required','optional','reference'),
                           "analyzed": row["analyzed"], "audience": item.get("audience", ""),
                           "deadlineExpression": item.get("deadline_expression"), "deadlineKind": item.get("deadline_kind", "submission"),
                           "deadlineConfirmed": item.get("resolved_confirmed", confirmed_date(item) or api_due),
@@ -84,6 +86,7 @@ def build_data(snapshot, cache, provider, today=None):
                           "flags": item.get("review_flags", [])})
     opportunities = collect_opportunities(jobs, cache, today)
     return {"today": today.isoformat(), "generatedAt": datetime.now(SEOUL).isoformat(),
+            "autoAnalyze": bool(snapshot.get('auto_analysis_consent')),
             "snapshotAt": snapshot.get("fetched_at"), "model": DEFAULT_MODEL,
             "courses": [{"id": c["id"], "name": c.get("name", "이름 없는 수업")} for c in snapshot.get("courses", [])],
             "tasks": tasks, "posts": posts, "opportunities": opportunities, "schedule": combine(tasks, opportunities),

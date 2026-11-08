@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from snapshot_history import with_history
 
 
 def digest(value):
@@ -148,8 +149,11 @@ class Store:
 
     def save_snapshot(self, user_id, snapshot):
         with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            prior = db.execute('SELECT data FROM snapshots WHERE user_id=?', (user_id,)).fetchone()
+            saved = with_history(json.loads(prior[0]) if prior else None, snapshot)
             db.execute("INSERT INTO snapshots VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data",
-                       (user_id, json.dumps(snapshot, ensure_ascii=False)))
+                       (user_id, json.dumps(saved, ensure_ascii=False)))
 
     def personal(self, user_id):
         with self.db() as db:
@@ -172,16 +176,19 @@ class Store:
                 raise ValueError("server_busy")
             if limit:
                 used = db.execute("SELECT COALESCE(SUM(reserved),0) FROM jobs WHERE user_id=? AND day=? AND kind='analyze'", (user_id, day)).fetchone()[0]
-                if used + limit > daily_limit:
+                if daily_limit and used + limit > daily_limit:
                     raise ValueError("daily_limit")
                 total = db.execute("SELECT COALESCE(SUM(reserved),0) FROM jobs WHERE day=? AND kind='analyze'", (day,)).fetchone()[0]
-                if total + limit > global_limit:
+                if global_limit and total + limit > global_limit:
                     raise ValueError("global_limit")
             db.execute("INSERT INTO jobs VALUES (?,?,?,'queued','대기 중',?,?,NULL,?)", (job_id, user_id, kind, limit, day, time.time_ns() // 1000))
         return job_id
 
     def finish_job(self, user_id, job_id, status, stage, result=None):
         with self.db() as db:
+            if status == 'running' and result is None:
+                db.execute('UPDATE jobs SET status=?,stage=? WHERE id=? AND user_id=?', (status,stage,job_id,user_id))
+                return
             db.execute("UPDATE jobs SET status=?,stage=?,result=? WHERE id=? AND user_id=?",
                        (status, stage, json.dumps(result, ensure_ascii=False), job_id, user_id))
 
@@ -199,7 +206,7 @@ class Store:
 
     def recover_jobs(self):
         with self.db() as db:
-            db.execute("UPDATE jobs SET status='interrupted',stage='서버가 재시작되었습니다. 저장된 결과를 확인하세요.' WHERE status IN ('queued','running')")
+            db.execute("UPDATE jobs SET status='interrupted',stage='서버가 재시작되었습니다. 저장된 결과를 확인하세요.' WHERE status IN ('queued','running') AND kind IN ('sync','analyze')")
 
     def delete_user(self, user_id):
         with self.db() as db:

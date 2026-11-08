@@ -27,11 +27,13 @@ services:
       - key: GOOGLE_WEB_CLIENT_SECRET
         sync: false
       - key: WEB_AI_ENABLED
-        value: "false"
+        sync: false
       - key: WEB_AI_DAILY_LIMIT
-        value: "3"
+        value: "0"
       - key: WEB_AI_GLOBAL_DAILY_LIMIT
-        value: "30"
+        value: "0"
+      - key: SCHOOL_EMAIL_DOMAIN
+        value: js.hs.kr
   # Public information has no application startup or database dependency.
   # Static sites are free; there is no paid instance, disk or new database.
   - type: web

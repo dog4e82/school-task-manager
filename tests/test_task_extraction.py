@@ -125,6 +125,15 @@ class TaskExtractionTests(unittest.TestCase):
         self.assertTrue(all(r['resolved_due']==p['due_at'] and r['api_due'] for r in rows))
         self.assertEqual(rows[0]['task_status'],'unknown')
 
+    def test_ui_keeps_task_confirmation_separate_from_registered_deadline(self):
+        p=post('자료를 첨부하면 참고합니다.',source='coursework',due='2026-11-30T23:59:00+09:00')
+        child=item('자료 첨부',p['text'],status='unknown')
+        child['proposed_task_status']='required'
+        cache=Mock();cache.get.return_value={'status':'success','result':{'items':[child]}}
+        data=build_data({'courses':[],'assignments':[p],'announcements':[]},cache,'',date(2026,11,8))
+        self.assertFalse(data['tasks'][0]['taskConfirmed'])
+        self.assertTrue(data['tasks'][0]['deadlineConfirmed'])
+
     def test_related_report_is_only_a_proposal_and_same_course(self):
         quote="캡처 후 최종 보고서 제출할 때 함께 제출하세요."
         p=post("주식 종목 변경\n"+quote)

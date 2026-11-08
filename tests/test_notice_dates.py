@@ -8,7 +8,7 @@ from opportunities import collect
 from deadline_schedule import combine
 
 
-ROBOT = "접수기간: 2026. 10. 8.(목) 18:00~11. 2.(월) 18:00\n참가를 원하는 학생은 이번주 금요일까지 정보연구실 황지영T에게 말해주세요."
+ROBOT = "접수기간: 2026. 10. 8.(목) 18:00~11. 2.(월) 18:00\n참가를 원하는 학생은 이번주 금요일까지 담당 선생님께 말해주세요."
 CREATED = "2026-10-20T01:00:00Z"
 
 

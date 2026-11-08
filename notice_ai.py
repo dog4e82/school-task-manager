@@ -358,8 +358,10 @@ def analyze_one(client, model, job):
     return result, metrics
 
 
-def run_analysis(client, cache, jobs, model, limit=3, retry_failed=False, dry_run=False):
+def run_analysis(client, cache, jobs, model, limit=3, retry_failed=False, dry_run=False, progress=None, minimum_credits=None, stop_requested=None):
     report = {"total": len(jobs), "cached": 0, "calls": 0, "succeeded": 0, "failed": 0, "skipped": 0}
+    if callable(getattr(type(cache), 'preload', None)):
+        cache.preload([job['key'] for job in jobs])
     queue = []
     for job in jobs:
         record = cache.get(job["key"])
@@ -374,6 +376,9 @@ def run_analysis(client, cache, jobs, model, limit=3, retry_failed=False, dry_ru
     report["pending"] = len(queue)
     if dry_run or not queue:
         return report
+    if stop_requested and (reason := stop_requested()):
+        report['stopped'] = reason
+        return report
     catalog = client.models()
     selected = next((m for m in catalog["data"] if m["id"] == model), None)
     if not selected or selected.get("type") != "llm" or "codex" in model.lower():
@@ -383,10 +388,33 @@ def run_analysis(client, cache, jobs, model, limit=3, retry_failed=False, dry_ru
     after = None
     try:
         for job in queue[:limit]:
+            if stop_requested and (reason := stop_requested()):
+                report['stopped'] = reason
+                break
+            if minimum_credits is not None:
+                balance = client.balance('다음 호출 전 잔액') if report['calls'] else before
+                try:
+                    remaining = Decimal(str(balance['total']['remaining']))
+                    floor = Decimal(str(minimum_credits))
+                    if not remaining.is_finite() or not floor.is_finite():
+                        raise InvalidOperation()
+                except (KeyError, TypeError, InvalidOperation):
+                    report['stopped'] = 'balance_unavailable'
+                    break
+                if remaining < floor:
+                    report['stopped'] = 'low_credits'
+                    break
             if not cache.claim(job, model, retry_failed):
                 continue
             report["calls"] += 1
             report["pending"] -= 1
+            if progress:
+                try:
+                    progress(dict(report))
+                except Exception:
+                    # A status update must not prevent a claimed call from
+                    # being saved or cause a second generation request.
+                    pass
             print(f"AI 분석 중: {report['calls']}/{min(limit, len(queue))}")
             try:
                 result, metrics = analyze_one(client, model, job)

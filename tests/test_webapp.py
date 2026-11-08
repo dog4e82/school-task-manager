@@ -18,6 +18,7 @@ from classroom import READ_SCOPES, SYNC_SCOPES
 from webapp import WEB_SCOPES, create_app
 from web_settings import Settings, google_config_fingerprints
 from web_store import Store
+from notice_ai import Cache, DEFAULT_MODEL, prepare
 
 
 def credentials(label):
@@ -87,6 +88,19 @@ class WebTests(unittest.TestCase):
         headers = self.login(self.b)
         self.assertEqual(self.client.post('/api/personal', headers=headers,
                          json={'item_id': first, 'saved': True}).status_code, 404)
+
+    def test_snapshot_change_history_is_account_scoped_and_visible_after_resync(self):
+        current = snapshot('a')
+        current['fetched_at'] = '2026-11-08T11:00:00Z'
+        current['assignments'][0]['due_at'] = '2026-11-17T23:59:00+09:00'
+        self.store.save_snapshot(self.a, current)
+        self.login(self.a)
+        changes = self.client.get('/api/data').json()['posts'][0]['changes']
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]['before'], '2026-11-15T23:59:00+09:00')
+        self.assertEqual(changes[0]['after'], '2026-11-17T23:59:00+09:00')
+        self.login(self.b)
+        self.assertTrue(all(not post['changes'] for post in self.client.get('/api/data').json()['posts']))
 
     def test_public_pages_remain_informational_with_cookie_and_database_unavailable(self):
         self.login(self.a)
@@ -241,6 +255,95 @@ class WebTests(unittest.TestCase):
         self.settings.ai_enabled = True
         self.assertEqual(self.client.post("/api/analyze", json={"consent": False}, headers=headers).status_code, 400)
         self.assertEqual(self.client.post("/api/analyze", json={"consent": True, "model": "other"}, headers=headers).status_code, 422)
+
+    def test_cached_ai_request_uses_no_quota_and_makes_no_network_call(self):
+        self.settings.ai_enabled = True
+        headers = self.login(self.a)
+        jobs = prepare(self.store.snapshot(self.a), DEFAULT_MODEL, self.settings.baze_base)
+        cache = Cache(self.settings.data_dir / 'analysis.sqlite3')
+        try:
+            for job in jobs:
+                cache.claim(job, DEFAULT_MODEL)
+                cache.finish(job['key'], 'success', {'items': [], 'relations': []})
+        finally:
+            cache.close()
+        with patch('webapp.Client') as client, patch.object(self.app.state.executor, 'submit') as submit:
+            response = self.client.post('/api/analyze', json={'consent': True}, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.json()['reused'])
+        self.assertIsNone(self.store.latest_job(self.a))
+        submit.assert_not_called()
+        client.assert_not_called()
+
+    def test_ai_job_reserves_only_the_number_of_new_candidates(self):
+        self.settings.ai_enabled = True
+        headers = self.login(self.a)
+        with patch.object(self.app.state.executor, 'submit'):
+            response = self.client.post('/api/analyze', json={'consent': True, 'limit': 3}, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        with self.store.db() as db:
+            reserved = db.execute('SELECT reserved FROM jobs WHERE id=?', (response.json()['job_id'],)).fetchone()[0]
+        self.assertEqual(reserved, 1)
+
+    def test_school_analysis_has_no_three_item_cap_and_other_domains_cannot_start(self):
+        self.settings.ai_enabled = True
+        self.settings.school_domain = 'js.hs.kr'
+        headers = self.login(self.a)
+        self.assertEqual(self.client.post('/api/analyze', json={'consent': True}, headers=headers).status_code, 403)
+        self.store.save_user('subject-a', 'student@js.hs.kr', '학생', credentials('a'))
+        current = snapshot('a')
+        current['assignments'] = [{**current['assignments'][0], 'id': 'post-'+str(i)} for i in range(6)]
+        self.store.save_snapshot(self.a, current)
+        with patch.object(self.app.state.executor, 'submit') as submit:
+            response = self.client.post('/api/analyze', json={'consent': True}, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertIsNone(submit.call_args.args[-1])
+
+    def test_sync_can_request_analysis_only_with_valid_operator_and_school_settings(self):
+        headers = self.login(self.a)
+        body = {'course_ids': ['a'], 'analyze_after_sync': True}
+        self.assertEqual(self.client.post('/api/sync', json=body, headers=headers).status_code, 503)
+        self.settings.ai_enabled = True
+        with patch.object(self.app.state.executor, 'submit') as submit:
+            response = self.client.post('/api/sync', json=body, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(submit.call_args.args[-1])
+
+    def test_zero_daily_quota_means_no_count_cap(self):
+        first = self.store.new_job(self.a, 'analyze', '2026-11-08', limit=500, daily_limit=0, global_limit=0)
+        self.store.finish_job(self.a, first, 'done', '완료')
+        self.assertTrue(self.store.new_job(self.a, 'analyze', '2026-11-08', limit=500, daily_limit=0, global_limit=0))
+
+    def test_setup_emphasizes_pdf_before_course_selection_and_identifies_ai_transfer(self):
+        self.settings.ai_enabled = True
+        self.login(self.a)
+        page = self.client.get('/setup').text
+        self.assertLess(page.index('id="pdf-first-title"'), page.index('id="course-options"'))
+        self.assertIn('href="/auth/google?pdf=1"', page)
+        self.assertIn('BAZE로 보내는 데 동의', page)
+        self.assertIn('id="auto-analyze"', page)
+
+    def test_sync_then_analysis_uses_the_saved_snapshot_and_credit_guard(self):
+        self.settings.ai_enabled = True
+        headers = self.login(self.a)
+        service = Mock()
+        service.courses.return_value.list.return_value.execute.return_value = {'courses': [{'id': 'a', 'name': 'A'}]}
+        current = snapshot('a'); current['materials'] = []
+        report = {'failed': 0, 'calls': 1, 'succeeded': 1, 'cached': 0, 'pending': 0}
+        with patch('webapp.build', return_value=service), patch('webapp.collect_snapshot', return_value=current), \
+             patch('webapp.run_analysis', return_value=report) as analyze, \
+             patch.object(self.app.state.executor, 'submit', side_effect=lambda fn,*args: fn(*args)):
+            response = self.client.post('/api/sync', json={'course_ids': ['a'], 'analyze_after_sync': True}, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.client.get('/api/jobs/'+response.json()['job_id']).json()['status'], 'done')
+        self.assertEqual(analyze.call_args.kwargs['minimum_credits'], 2000)
+        self.assertTrue(self.store.snapshot(self.a)['auto_analysis_consent'])
+
+    def test_running_job_progress_preserves_early_dashboard_readiness(self):
+        job = self.store.new_job(self.a, 'sync', '2026-11-08')
+        self.store.finish_job(self.a, job, 'running', '본문 연결 완료', {'snapshot_ready': True})
+        self.store.finish_job(self.a, job, 'running', 'PDF 확인 중')
+        self.assertTrue(self.store.job(self.a, job)['result']['snapshot_ready'])
 
     def test_delete_own_account_revokes_and_removes_only_own_data(self):
         headers = self.login(self.a)
